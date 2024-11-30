@@ -8,7 +8,7 @@ jobs:
     steps:
       - checkout
       - run:
-          command: dotnet.exe build --configuration Release CatsAndMouseGame /p:PublishProfile=CatsAndMouseGame\\Properties\\PublishProfiles\\FolderProfile.pubxml /p:DeployOnBuild=true'
+          command: dotnet.exe build --configuration Release CatsAndMouseGame
   deploy:
     working_directory: ~/cats-and-mouse-api
     docker:
