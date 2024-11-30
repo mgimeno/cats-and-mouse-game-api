@@ -9,6 +9,10 @@ jobs:
       - checkout
       - run:
           command: dotnet.exe build --configuration Release CatsAndMouseGame
+      - persist_to_workspace:
+            root: ~/cats-and-mouse-api
+            paths:
+                - .
   deploy:
     working_directory: ~/cats-and-mouse-api
     docker:
