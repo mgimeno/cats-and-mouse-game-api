@@ -9,6 +9,13 @@ jobs:
       - checkout
       - run:
           command: dotnet.exe build --configuration Release CatsAndMouseGame
+  deploy:
+    working_directory: ~/cats-and-mouse-api
+    docker:
+      - image: cimg/base:2024.02
+    steps:
+      - attach_workspace:
+            at: ~/cats-and-mouse-api
       - add_ssh_keys:
           fingerprints:
             - "SHA256:URTfidP7xVnBRdhWO03zsI0UdDd1nk+ht5pqT1f4UcY"
@@ -20,24 +27,6 @@ jobs:
             ssh $SSH_USER@$SSH_HOST "mkdir -p /home/mgimeno/apps/cats-and-mouse-api"
             ls
             scp -rv CatsAndMouseGame $SSH_USER@$SSH_HOST:apps/cats-and-mouse-api
-  deploy:
-    working_directory: ~/cats-and-mouse-api
-    docker:
-      - image: cimg/base:2024.02
-    steps:
-      - attach_workspace:
-            at: ~/cats-and-mouse-api
-      # - add_ssh_keys:
-      #     fingerprints:
-      #       - "SHA256:URTfidP7xVnBRdhWO03zsI0UdDd1nk+ht5pqT1f4UcY"
-      # - run:
-      #     command: |
-      #       mkdir -p ~/.ssh
-      #       ssh-keyscan $SSH_HOST >> ~/.ssh/known_hosts
-      #       ssh $SSH_USER@$SSH_HOST "rm -dRf /home/mgimeno/apps/cats-and-mouse-api"
-      #       ssh $SSH_USER@$SSH_HOST "mkdir -p /home/mgimeno/apps/cats-and-mouse-api"
-      #       ls -l
-      #       scp -rv * $SSH_USER@$SSH_HOST:apps/cats-and-mouse-api
 workflows:
   build-and-deploy:
     jobs:
