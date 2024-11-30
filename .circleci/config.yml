@@ -19,7 +19,7 @@ jobs:
             ssh $SSH_USER@$SSH_HOST "rm -dRf /home/mgimeno/apps/cats-and-mouse-api"
             ssh $SSH_USER@$SSH_HOST "mkdir -p /home/mgimeno/apps/cats-and-mouse-api"
             ls
-            scp -rv * $SSH_USER@$SSH_HOST:apps/cats-and-mouse-api
+            scp -rv ./CatsAndMouseGame/* $SSH_USER@$SSH_HOST:apps/cats-and-mouse-api
   deploy:
     working_directory: ~/cats-and-mouse-api
     docker:
