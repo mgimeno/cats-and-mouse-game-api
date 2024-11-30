@@ -29,7 +29,6 @@ jobs:
             ssh-keyscan $SSH_HOST >> ~/.ssh/known_hosts
             ssh $SSH_USER@$SSH_HOST "rm -dRf /home/mgimeno/apps/cats-and-mouse-api"
             ssh $SSH_USER@$SSH_HOST "mkdir -p /home/mgimeno/apps/cats-and-mouse-api"
-            ls
             scp -rv CatsAndMouseGame/* $SSH_USER@$SSH_HOST:apps/cats-and-mouse-api
 workflows:
   build-and-deploy:
