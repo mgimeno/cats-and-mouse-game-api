@@ -1,0 +1,39 @@
+version: 2.1
+orbs:
+  windows: circleci/windows@2.2.0
+jobs:
+  build:
+    executor: windows/default
+    working_directory: ~/cats-and-mouse-api
+    steps:
+      - checkout
+      - run:
+          command: dotnet.exe build --configuration Release CatsAndMouseGame
+      - persist_to_workspace:
+            root: ~/cats-and-mouse-api
+            paths:
+                - .
+  deploy:
+    working_directory: ~/cats-and-mouse-api
+    docker:
+      - image: cimg/base:2024.02
+    steps:
+      - attach_workspace:
+            at: ~/cats-and-mouse-api
+      - add_ssh_keys:
+          fingerprints:
+            - "SHA256:URTfidP7xVnBRdhWO03zsI0UdDd1nk+ht5pqT1f4UcY"
+      - run:
+          command: |
+            mkdir -p ~/.ssh
+            ssh-keyscan $SSH_HOST >> ~/.ssh/known_hosts
+            ssh $SSH_USER@$SSH_HOST "rm -dRf /home/mgimeno/apps/cats-and-mouse-api"
+            ssh $SSH_USER@$SSH_HOST "mkdir -p /home/mgimeno/apps/cats-and-mouse-api"
+            scp -rv CatsAndMouseGame/bin/Release/netcoreapp3.1/* $SSH_USER@$SSH_HOST:apps/cats-and-mouse-api
+workflows:
+  build-and-deploy:
+    jobs:
+      - build
+      - deploy:
+          requires:
+            - build
