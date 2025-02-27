@@ -12,6 +12,7 @@ namespace CatsAndMouseGame.Controllers
     public class StatusController : ControllerBase
     {
         private readonly IWebHostEnvironment _env;
+         private readonly IConfiguration Configuration { get; }
 
         public StatusController(IWebHostEnvironment env)
         {
@@ -35,7 +36,9 @@ namespace CatsAndMouseGame.Controllers
                 <br />
                 Build Mode: {(isDebugMode ? "DEBUG (Development)" : "RELEASE (Production)")}
                 <br />
-                Environment: {_env.EnvironmentName.ToUpper()}"
+                Environment: {_env.EnvironmentName.ToUpper()}
+                <br />
+                Website URL: {Configuration.GetSection("WebsiteUrl").Value}"
             };
         }
 
