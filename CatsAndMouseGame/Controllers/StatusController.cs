@@ -39,7 +39,7 @@ namespace CatsAndMouseGame.Controllers
                 <br />
                 Environment: {_env.EnvironmentName.ToUpper()}
                 <br />
-                Website URL: {Configuration.GetSection("WebsiteUrl").Value}"
+                Website URL: {_configuration.GetSection("WebsiteUrl").Value}"
             };
         }
 
