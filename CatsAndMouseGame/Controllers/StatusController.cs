@@ -12,7 +12,7 @@ namespace CatsAndMouseGame.Controllers
     public class StatusController : ControllerBase
     {
         private readonly IWebHostEnvironment _env;
-        private readonly IConfiguration _configuration { get; }
+        private IConfiguration _configuration { get; }
 
         public StatusController(IWebHostEnvironment env, IConfiguration configuration)
         {
