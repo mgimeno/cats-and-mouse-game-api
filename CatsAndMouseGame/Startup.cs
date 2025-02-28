@@ -61,6 +61,8 @@ namespace CatsAndMouseGame
 
             app.UseForwardedHeaders();
 
+            app.UseHttpsRedirection()
+
             app.UseRouting();
 
             app.UseCors("CorsPolicy");
