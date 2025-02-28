@@ -40,7 +40,7 @@ namespace CatsAndMouseGame.Controllers
                 <br />
                 Environment: {_env.EnvironmentName.ToUpper()}
                 <br />
-                AllowedOrigins: {_configuration.GetSection("AllowedOrigins").Value}"
+                Allowed origins: {_configuration.GetSection("AllowedOrigins").Value}"
             };
         }
 
