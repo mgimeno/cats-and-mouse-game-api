@@ -15,7 +15,7 @@ namespace CatsAndMouseGame
         public static IWebHostBuilder CreateWebHostBuilder(string[] args) =>
             WebHost.CreateDefaultBuilder(args)
             //.UseSetting("https_port", "51000")
-            .UseUrls("http://127.0.0.1:51000")
+            .UseUrls("https://127.0.0.1:51000")
                 .UseStartup<Startup>().ConfigureAppConfiguration((builderContext, config) =>
                 {
                     IWebHostEnvironment env = builderContext.HostingEnvironment;
