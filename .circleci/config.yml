@@ -30,6 +30,7 @@ jobs:
             ssh $SSH_USER@$SSH_HOST "rm -dRf /home/mgimeno/apps/cats-and-mouse-api"
             ssh $SSH_USER@$SSH_HOST "mkdir -p /home/mgimeno/apps/cats-and-mouse-api"
             scp -rv CatsAndMouseGame/bin/Release/netcoreapp3.1/* $SSH_USER@$SSH_HOST:apps/cats-and-mouse-api
+            ssh $SSH_USER@$SSH_HOST "sh /home/mgimeno/restart-cats-and-mouse-api.sh"
 workflows:
   build-and-deploy:
     jobs:
