@@ -34,7 +34,7 @@ namespace CatsAndMouseGame
                    {
                        builder.AllowAnyMethod()
                                 .AllowAnyHeader()
-                                .WithOrigins(Configuration.GetSection("WebsiteUrl").Value)
+                                .WithOrigins(Configuration.GetSection("AllowedOrigins").Value)
                               .AllowCredentials();
                    });
 

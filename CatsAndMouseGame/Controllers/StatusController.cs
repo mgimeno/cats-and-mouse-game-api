@@ -35,12 +35,12 @@ namespace CatsAndMouseGame.Controllers
                 ContentType = "text/html",
                 Content = $@"
                 CATS & MOUSE API IS READY
-                <br />
+                <br /><br />
                 Build Mode: {(isDebugMode ? "DEBUG (Development)" : "RELEASE (Production)")}
                 <br />
                 Environment: {_env.EnvironmentName.ToUpper()}
                 <br />
-                Website URL: {_configuration.GetSection("WebsiteUrl").Value}"
+                AllowedOrigins: {_configuration.GetSection("AllowedOrigins").Value}"
             };
         }
 
