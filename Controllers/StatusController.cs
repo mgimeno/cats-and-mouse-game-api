@@ -1,13 +1,11 @@
 ﻿using Microsoft.AspNetCore.Cors;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Configuration;
 
 
 namespace CatsAndMouseGame.Controllers
 {
     [EnableCors("CorsPolicy")]
-    [Route("api/[action]")]
+    [Route("status")]
     [ApiController]
 
     public class StatusController : ControllerBase

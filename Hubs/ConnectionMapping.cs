@@ -1,7 +1,4 @@
-﻿using System.Collections.Generic;
-using System.Linq;
-
-namespace CatsAndMouseGame.Hubs
+﻿namespace CatsAndMouseGame.Hubs
 {
     public class ConnectionMapping<T>
     {
