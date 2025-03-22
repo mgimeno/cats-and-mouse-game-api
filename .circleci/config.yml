@@ -1,6 +1,6 @@
 version: 2.1
 orbs:
-  windows: circleci/windows@2.2.0
+  windows: circleci/windows@5.1.0
 jobs:
   build:
     executor: windows/default
