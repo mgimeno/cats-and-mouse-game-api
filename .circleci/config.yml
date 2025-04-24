@@ -49,7 +49,7 @@ jobs:
             ssh $SSH_USER@$SSH_HOST "rm -f << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>/<< pipeline.parameters.project-folder >>.zip"
             ssh $SSH_USER@$SSH_HOST "rm -dRf << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >>"
             ssh $SSH_USER@$SSH_HOST "mv << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >> << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >>"
-            ssh $SSH_USER@$SSH_HOST "sh << pipeline.parameters.server-base-folder >>restart-cats-and-mouse-api.sh"
+            ssh $SSH_USER@$SSH_HOST "sh << pipeline.parameters.server-base-folder >>scripts/restart-cats-and-mouse-api.sh"
 workflows:
   build-and-deploy:
     jobs:
