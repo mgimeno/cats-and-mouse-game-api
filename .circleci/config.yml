@@ -1,25 +1,41 @@
 version: 2.1
+parameters:
+  project-folder:
+    type: string
+    default: "cats-and-mouse-api"
+  temp-upload-folder-slug:
+    type: string
+    default: "-temp-upload"
+  server-base-folder:
+    type: string
+    default: "/home/$SSH_USER/apps/"
+  build-zip-name:
+    type: string
+    default: "dist"
+  build-dist-folder:
+    type: string
+    default: "bin/Release/net9.0"
 orbs:
   windows: circleci/windows@5.1.0
 jobs:
   build:
     executor: windows/default
-    working_directory: ~/cats-and-mouse-api
+    working_directory: ~/<< pipeline.parameters.project-folder >>
     steps:
       - checkout
       - run:
           command: dotnet.exe build --configuration Release
       - persist_to_workspace:
-            root: ~/cats-and-mouse-api
+            root: ~/<< pipeline.parameters.project-folder >>
             paths:
                 - .
   deploy:
-    working_directory: ~/cats-and-mouse-api
+    working_directory: ~/<< pipeline.parameters.project-folder >>
     docker:
       - image: cimg/base:2024.02
     steps:
       - attach_workspace:
-            at: ~/cats-and-mouse-api
+            at: ~/<< pipeline.parameters.project-folder >>
       - add_ssh_keys:
           fingerprints:
             - "SHA256:URTfidP7xVnBRdhWO03zsI0UdDd1nk+ht5pqT1f4UcY"
@@ -27,10 +43,15 @@ jobs:
           command: |
             mkdir -p ~/.ssh
             ssh-keyscan $SSH_HOST >> ~/.ssh/known_hosts
-            ssh $SSH_USER@$SSH_HOST "rm -dRf /home/mgimeno/apps/cats-and-mouse-api"
-            ssh $SSH_USER@$SSH_HOST "mkdir -p /home/mgimeno/apps/cats-and-mouse-api"
-            scp -rv bin/Release/net9.0/* $SSH_USER@$SSH_HOST:apps/cats-and-mouse-api
-            ssh $SSH_USER@$SSH_HOST "sh /home/mgimeno/restart-cats-and-mouse-api.sh"
+            ssh $SSH_USER@$SSH_HOST "rm -dRf << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>"
+            ssh $SSH_USER@$SSH_HOST "mkdir -p << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>"
+            zip -r << pipeline.parameters.build-zip-name >>.zip ./<< pipeline.parameters.build-dist-folder >>
+            scp -v << pipeline.parameters.build-zip-name >>.zip $SSH_USER@$SSH_HOST:/<< pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>
+            ssh $SSH_USER@$SSH_HOST "unzip -d << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >> << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>/<< pipeline.parameters.build-zip-name >>.zip"
+            ssh $SSH_USER@$SSH_HOST "rm -dRf << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >>"
+            ssh $SSH_USER@$SSH_HOST "mv << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>/<< pipeline.parameters.build-zip-name >> << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >>"
+            ssh $SSH_USER@$SSH_HOST "rm -dRf << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>"
+            ssh $SSH_USER@$SSH_HOST "sh << pipeline.parameters.server-base-folder >>restart-cats-and-mouse-api.sh"
 workflows:
   build-and-deploy:
     jobs:
