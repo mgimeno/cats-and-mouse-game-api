@@ -9,9 +9,6 @@ parameters:
   server-base-folder:
     type: string
     default: "/home/$SSH_USER/apps/"
-  build-zip-name:
-    type: string
-    default: "dist"
   build-dist-folder:
     type: string
     default: "bin/Release/net9.0"
@@ -46,10 +43,10 @@ jobs:
             ssh $SSH_USER@$SSH_HOST "rm -dRf << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>"
             ssh $SSH_USER@$SSH_HOST "mkdir -p << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>"
             cd << pipeline.parameters.build-dist-folder >>
-            zip -r << pipeline.parameters.build-zip-name >>.zip ./*
-            scp -v << pipeline.parameters.build-zip-name >>.zip $SSH_USER@$SSH_HOST:/<< pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>
-            ssh $SSH_USER@$SSH_HOST "unzip -d << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >> << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>/<< pipeline.parameters.build-zip-name >>.zip"
-            ssh $SSH_USER@$SSH_HOST "rm -f << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>/<< pipeline.parameters.build-zip-name >>.zip"
+            zip -r << pipeline.parameters.project-folder >>.zip ./*
+            scp -v << pipeline.parameters.project-folder >>.zip $SSH_USER@$SSH_HOST:/<< pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>
+            ssh $SSH_USER@$SSH_HOST "unzip -d << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >> << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>/<< pipeline.parameters.project-folder >>.zip"
+            ssh $SSH_USER@$SSH_HOST "rm -f << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>/<< pipeline.parameters.project-folder >>.zip"
             ssh $SSH_USER@$SSH_HOST "rm -dRf << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >>"
             ssh $SSH_USER@$SSH_HOST "mv << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >> << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >>"
             ssh $SSH_USER@$SSH_HOST "sh << pipeline.parameters.server-base-folder >>restart-cats-and-mouse-api.sh"
