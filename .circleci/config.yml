@@ -49,9 +49,9 @@ jobs:
             zip -r << pipeline.parameters.build-zip-name >>.zip ./*
             scp -v << pipeline.parameters.build-zip-name >>.zip $SSH_USER@$SSH_HOST:/<< pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>
             ssh $SSH_USER@$SSH_HOST "unzip -d << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >> << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>/<< pipeline.parameters.build-zip-name >>.zip"
+            ssh $SSH_USER@$SSH_HOST "rm -f << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>/<< pipeline.parameters.build-zip-name >>.zip"
             ssh $SSH_USER@$SSH_HOST "rm -dRf << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >>"
-            ssh $SSH_USER@$SSH_HOST "mv << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>/<< pipeline.parameters.build-zip-name >> << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >>"
-            ssh $SSH_USER@$SSH_HOST "rm -dRf << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>"
+            ssh $SSH_USER@$SSH_HOST "mv << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >> << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >>"
             ssh $SSH_USER@$SSH_HOST "sh << pipeline.parameters.server-base-folder >>restart-cats-and-mouse-api.sh"
 workflows:
   build-and-deploy:
