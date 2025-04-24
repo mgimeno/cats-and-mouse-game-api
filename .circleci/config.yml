@@ -45,7 +45,8 @@ jobs:
             ssh-keyscan $SSH_HOST >> ~/.ssh/known_hosts
             ssh $SSH_USER@$SSH_HOST "rm -dRf << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>"
             ssh $SSH_USER@$SSH_HOST "mkdir -p << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>"
-            zip -r << pipeline.parameters.build-zip-name >>.zip ./<< pipeline.parameters.build-dist-folder >>
+            cd << pipeline.parameters.build-dist-folder >>
+            zip -r << pipeline.parameters.build-zip-name >>.zip ./*
             scp -v << pipeline.parameters.build-zip-name >>.zip $SSH_USER@$SSH_HOST:/<< pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>
             ssh $SSH_USER@$SSH_HOST "unzip -d << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >> << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>/<< pipeline.parameters.build-zip-name >>.zip"
             ssh $SSH_USER@$SSH_HOST "rm -dRf << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >>"
