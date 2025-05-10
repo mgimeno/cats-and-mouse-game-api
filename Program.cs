@@ -1,5 +1,9 @@
+using System.Net;
+using System.Security.Cryptography.X509Certificates;
 using CatsAndMouseGame.Hubs;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
+// using static Microsoft.AspNetCore.Http.StatusCodes;
 
 var builder = WebApplication.CreateBuilder(args);
 var allowedOrigins = builder.Configuration.GetValue<string>("AllowedOrigins");
@@ -37,6 +41,30 @@ builder.Services.AddSignalR(hubOptions =>
         options.PayloadSerializerOptions.WriteIndented = false;
     });
 
+// if (!builder.Environment.IsDevelopment())
+// {
+//     builder.Services.AddHttpsRedirection(options =>
+//     {
+//         options.HttpsPort = 51000;
+//         options.RedirectStatusCode = Status307TemporaryRedirect;
+//     });
+// }
+
+if (!builder.Environment.IsDevelopment()){
+    //Set SSL Certificate
+    builder.Services.Configure<KestrelServerOptions>(options =>
+    {
+        var cert = X509Certificate2.CreateFromPemFile ("/home/mgimeno/certificates/marcosgimeno_com_chain.crt", "/home/mgimeno/certificates/marcosgimeno.com.key");
+        //var cert = new X509Certificate2("/", "");
+
+        options.Listen(IPAddress.Any, 80); // http
+        options.Listen(IPAddress.Any, 443, listenOptions => // https
+        {
+            listenOptions.UseHttps(cert);
+        });
+    });
+}
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -44,10 +72,16 @@ if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
+else{
+    //app.UseHsts();
+}
 
 app.UseForwardedHeaders();
 
-//app.UseHttpsRedirection();
+if (!app.Environment.IsDevelopment())
+{
+app.UseHttpsRedirection();
+}
 
 app.UseRouting();
 
