@@ -91,4 +91,12 @@ app.MapHub<GameHub>("/gameHub");
 
 app.MapControllerRoute("default","{controller=Status}/{action=Status}");
 
+if (app.Environment.IsDevelopment())
+{
 app.Run("http://127.0.0.1:51000");
+}
+else{
+    app.Run("https://127.0.0.1:51000");
+}
+
+
