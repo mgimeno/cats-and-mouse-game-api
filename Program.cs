@@ -65,6 +65,8 @@ if (!builder.Environment.IsDevelopment()){
     });
 }
 
+builder.WebHost.UseUrls();
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
