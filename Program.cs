@@ -45,7 +45,7 @@ builder.Services.AddSignalR(hubOptions =>
 // {
 //     builder.Services.AddHttpsRedirection(options =>
 //     {
-//         options.HttpsPort = 51000;
+//         options.HttpsPort = 53000;
 //         options.RedirectStatusCode = Status307TemporaryRedirect;
 //     });
 // }
@@ -58,7 +58,7 @@ if (!builder.Environment.IsDevelopment()){
         //var cert = new X509Certificate2("/", "");
 
         //options.Listen(IPAddress.Any, 80); // http
-        options.Listen(IPAddress.Any, 51000, listenOptions => // https
+        options.Listen(IPAddress.Any, 53000, listenOptions => // https
         {
             listenOptions.UseHttps(cert);
         });
@@ -95,10 +95,10 @@ app.MapControllerRoute("default","{controller=Status}/{action=Status}");
 
 if (app.Environment.IsDevelopment())
 {
-app.Run("http://127.0.0.1:51000");
+app.Run("http://127.0.0.1:53000");
 }
 else{
-    app.Run("https://127.0.0.1:51000");
+    app.Run("https://127.0.0.1:53000");
 }
 
 
