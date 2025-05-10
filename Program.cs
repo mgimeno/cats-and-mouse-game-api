@@ -57,8 +57,8 @@ if (!builder.Environment.IsDevelopment()){
         var cert = X509Certificate2.CreateFromPemFile ("/home/mgimeno/certificates/marcosgimeno_com_chain.crt", "/home/mgimeno/certificates/marcosgimeno.com.key");
         //var cert = new X509Certificate2("/", "");
 
-        options.Listen(IPAddress.Any, 80); // http
-        options.Listen(IPAddress.Any, 443, listenOptions => // https
+        //options.Listen(IPAddress.Any, 80); // http
+        options.Listen(IPAddress.Any, 51000, listenOptions => // https
         {
             listenOptions.UseHttps(cert);
         });
