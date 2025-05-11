@@ -58,6 +58,10 @@ if (!builder.Environment.IsDevelopment()){
         //var cert = new X509Certificate2("/", "");
 
         //options.Listen(IPAddress.Any, 80); // http
+        options.Listen(IPAddress.Any, 443, listenOptions => // https
+        {
+            listenOptions.UseHttps(cert);
+        });
         options.Listen(IPAddress.Any, 53000, listenOptions => // https
         {
             listenOptions.UseHttps(cert);
