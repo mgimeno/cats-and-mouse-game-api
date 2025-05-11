@@ -69,7 +69,7 @@ if (!builder.Environment.IsDevelopment()){
     });
 }
 
-builder.WebHost.UseUrls(builder.Environment.IsDevelopment() ? ["http://127.0.0.1:53000"] : ["https://127.0.0.1:53000"]);
+builder.WebHost.UseUrls(urls: builder.Environment.IsDevelopment() ? "http://127.0.0.1:53000" : "https://127.0.0.1:53000");
 
 var app = builder.Build();
 
