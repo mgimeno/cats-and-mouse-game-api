@@ -40,19 +40,20 @@ builder.Services.AddSignalR(hubOptions =>
     });
 
  if (!builder.Environment.IsDevelopment()){
-//     // Set SSL Certificate for HTTPS
-//     builder.Services.Configure<KestrelServerOptions>(options =>
-//     {
-//         var cert = X509Certificate2.CreateFromPemFile ("/home/mgimeno/certificates/marcosgimeno_com_chain.crt", "/home/mgimeno/certificates/marcosgimeno.com.key");
-//         
-//         options.Listen(IPAddress.Any, 53000, listenOptions => // https
-//         {
-//             listenOptions.UseHttps(cert);
-//         });
-//     });
-
+   
+    builder.Services.Configure<KestrelServerOptions>(options =>
+    {
         // HTTP
-        options.Listen(IPAddress.Any, 53000); // http
+        options.Listen(IPAddress.Any, 53000);
+
+        // HTTPS -> Set SSL Certificate
+        // var cert = X509Certificate2.CreateFromPemFile ("/home/mgimeno/certificates/marcosgimeno_com_chain.crt", "/home/mgimeno/certificates/marcosgimeno.com.key");
+        // options.Listen(IPAddress.Any, 53000, listenOptions => 
+        // {
+        //     listenOptions.UseHttps(cert);
+        // });
+    });
+     
 }
 
 builder.WebHost.UseUrls(urls: builder.Environment.IsDevelopment() ? "http://127.0.0.1:53000" : "https://127.0.0.1:53000");
