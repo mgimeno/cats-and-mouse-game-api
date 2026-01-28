@@ -1,4 +1,4 @@
-@CatsAndMouseApi_HostAddress = https://127.0.0.1:53000
+@CatsAndMouseApi_HostAddress = http://127.0.0.1:53000
 
 GET {{CatsAndMouseApi_HostAddress}}/status/
 Accept: application/json
