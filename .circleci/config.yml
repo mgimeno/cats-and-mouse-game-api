@@ -11,45 +11,59 @@ parameters:
     default: "/home/$SSH_USER/apps/"
   build-dist-folder:
     type: string
-    default: "bin/Release/net9.0"
-orbs:
-  windows: circleci/windows@5.1.0
+    default: "bin/Release/net9.0/publish"
+
 jobs:
   build:
-    executor: windows/default
+    docker:
+      - image: mcr.microsoft.com/dotnet/sdk:9.0
     working_directory: ~/<< pipeline.parameters.project-folder >>
     steps:
       - checkout
       - run:
-          command: dotnet.exe build --configuration Release
+          name: Publish
+          command: dotnet publish --configuration Release --output bin/Release/net9.0/publish
       - persist_to_workspace:
-            root: ~/<< pipeline.parameters.project-folder >>
-            paths:
-                - .
+          root: ~/<< pipeline.parameters.project-folder >>
+          paths:
+            - .
+
   deploy:
     working_directory: ~/<< pipeline.parameters.project-folder >>
     docker:
-      - image: cimg/base:2024.02
+      - image: cimg/base:stable
     steps:
       - attach_workspace:
-            at: ~/<< pipeline.parameters.project-folder >>
+          at: ~/<< pipeline.parameters.project-folder >>
       - add_ssh_keys:
           fingerprints:
             - "SHA256:URTfidP7xVnBRdhWO03zsI0UdDd1nk+ht5pqT1f4UcY"
       - run:
+          name: Deploy to server
+          no_output_timeout: 5m
           command: |
             mkdir -p ~/.ssh
             ssh-keyscan $SSH_HOST >> ~/.ssh/known_hosts
-            ssh $SSH_USER@$SSH_HOST "rm -dRf << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>"
+
+            # Prepare temp folder
+            ssh $SSH_USER@$SSH_HOST "rm -rf << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>"
             ssh $SSH_USER@$SSH_HOST "mkdir -p << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>"
+
+            # Zip and upload
             cd << pipeline.parameters.build-dist-folder >>
             zip -r << pipeline.parameters.project-folder >>.zip ./*
-            scp -v << pipeline.parameters.project-folder >>.zip $SSH_USER@$SSH_HOST:/<< pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>
+            scp << pipeline.parameters.project-folder >>.zip $SSH_USER@$SSH_HOST:<< pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>
+
+            # Unzip
             ssh $SSH_USER@$SSH_HOST "unzip -d << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >> << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>/<< pipeline.parameters.project-folder >>.zip"
             ssh $SSH_USER@$SSH_HOST "rm -f << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>/<< pipeline.parameters.project-folder >>.zip"
-            ssh $SSH_USER@$SSH_HOST "rm -dRf << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >>"
+
+            # Stop service, swap folders, start service
+            ssh $SSH_USER@$SSH_HOST "sh << pipeline.parameters.server-base-folder >>scripts/stop-cats-and-mouse-api.sh"
+            ssh $SSH_USER@$SSH_HOST "rm -rf << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >>"
             ssh $SSH_USER@$SSH_HOST "mv << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >> << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >>"
-            ssh $SSH_USER@$SSH_HOST "sh << pipeline.parameters.server-base-folder >>scripts/restart-cats-and-mouse-api.sh"
+            ssh $SSH_USER@$SSH_HOST "sh << pipeline.parameters.server-base-folder >>scripts/start-cats-and-mouse-api.sh"
+
 workflows:
   build-and-deploy:
     jobs:
@@ -57,3 +71,6 @@ workflows:
       - deploy:
           requires:
             - build
+          filters:
+            branches:
+              only: main
