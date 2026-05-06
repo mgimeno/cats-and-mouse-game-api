@@ -4,8 +4,8 @@ namespace CatsAndMouseGame.Models
 {
     public class ChatLineModel
     {
-        public string UserName { get; set; }
+        public string UserName { get; set; } = string.Empty;
         public TeamEnum TeamId { get; set; }
-        public string Message { get; set; }
+        public string Message { get; set; } = string.Empty;
     }
 }

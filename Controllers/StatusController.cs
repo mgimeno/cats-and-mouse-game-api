@@ -1,17 +1,14 @@
-﻿using Microsoft.AspNetCore.Cors;
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 
 
 namespace CatsAndMouseGame.Controllers
 {
-    [EnableCors("CorsPolicy")]
     [Route("status")]
     [ApiController]
-
     public class StatusController : ControllerBase
     {
         private readonly IWebHostEnvironment _env;
-        private IConfiguration _configuration { get; }
+        private readonly IConfiguration _configuration;
 
         public StatusController(IWebHostEnvironment env, IConfiguration configuration)
         {
@@ -22,25 +19,22 @@ namespace CatsAndMouseGame.Controllers
         [HttpGet]
         public IActionResult Status()
         {
-
             var isDebugMode = false;
             #if DEBUG
             isDebugMode = true;
             #endif
+            var allowedOrigins = string.Join(", ", _configuration.GetSection("AllowedOrigins").Get<string[]>() ?? []);
 
             return new ContentResult
             {
-                ContentType = "text/html",
+                ContentType = "text/plain",
                 Content = $@"
-                CATS & MOUSE API IS READY
-                <br /><br />
-                Build Mode: {(isDebugMode ? "DEBUG (Development)" : "RELEASE (Production)")}
-                <br />
-                Environment: {_env.EnvironmentName.ToUpper()}
-                <br />
-                Allowed origins: {_configuration.GetSection("AllowedOrigins").Value}"
+Cats & Mouse API is ready
+
+Build Mode: {(isDebugMode ? "DEBUG (Development)" : "RELEASE (Production)")}
+Environment: {_env.EnvironmentName.ToUpperInvariant()}
+Allowed origins: {allowedOrigins}"
             };
         }
-
     }
 }

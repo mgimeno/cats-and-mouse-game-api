@@ -21,6 +21,9 @@ jobs:
     steps:
       - checkout
       - run:
+          name: Unit tests
+          command: dotnet test CatsAndMouseApi.sln --configuration Release
+      - run:
           name: Publish
           command: dotnet publish --configuration Release --output bin/Release/net9.0/publish
       - persist_to_workspace:

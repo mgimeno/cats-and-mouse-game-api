@@ -10,22 +10,25 @@ namespace CatsAndMouseGame.Models
     public class GameModel
     {
         public string Id { get; set; }
-        public string Password { get; set; }
+        public string? Password { get; set; }
+        public string? RematchGameId { get; set; }
         public List<PlayerModel> Players { get; set; }
         public List<IMessageToClient> ChatMessages { get; set; } 
         public DateTime DateCreated { get; set; }
+        public DateTime LastActivityUtc { get; set; }
         public DateTime? DateStarted { get; set; } = null;
         public DateTime? DateFinished { get; set; } = null;
 
-        public GameModel(string gamePassword = null)
+        public GameModel(string? gamePassword = null)
         {
-            this.Id = Guid.NewGuid().ToString().Replace("-", "").Substring(0, 5);
+            this.Id = Guid.NewGuid().ToString("N")[..5];
             this.Password = gamePassword;
 
             this.Players = new List<PlayerModel>();
             this.ChatMessages = new List<IMessageToClient>();
 
             this.DateCreated = DateTime.UtcNow;
+            this.LastActivityUtc = this.DateCreated;
         }
 
         public void SetFirstPlayer(TeamEnum teamId, string userName, string userId)
@@ -52,27 +55,29 @@ namespace CatsAndMouseGame.Models
 
         public void Start()
         {
-            var mousePlayer = GetPlayerByTeam(TeamEnum.Mouse);
+            var mousePlayer = GetPlayerByTeam(TeamEnum.Mouse)
+                ?? throw new InvalidOperationException("Mouse player does not exist");
 
             mousePlayer.IsTheirTurn = true;
             this.DateStarted = DateTime.UtcNow;
+            Touch();
 
             RecalculateFiguresCanMoveToPositions();
         }
 
-        public PlayerModel GetPlayerByUserId(string userId)
+        public PlayerModel? GetPlayerByUserId(string userId)
         {
-            return this.Players.Where(p => p.UserId == userId).FirstOrDefault();
+            return this.Players.FirstOrDefault(p => p.UserId == userId);
         }
 
-        public FigureModel GetPlayerFigure(PlayerModel player, int figureId)
+        public FigureModel? GetPlayerFigure(PlayerModel? player, int figureId)
         {
             if (player == null)
             {
                 return null;
             }
 
-            return player.Figures.Where(c => c.Id == figureId).FirstOrDefault();
+            return player.Figures.FirstOrDefault(c => c.Id == figureId);
         }
 
         public List<string> GetPlayersUsersIds()
@@ -83,6 +88,10 @@ namespace CatsAndMouseGame.Models
 
         public void RecalculateFiguresCanMoveToPositions()
         {
+            var occupiedPositions = this.Players
+                .SelectMany(p => p.Figures)
+                .Select(f => (f.Position.RowIndex, f.Position.ColumnIndex))
+                .ToHashSet();
 
             foreach (var player in this.Players)
             {
@@ -90,7 +99,7 @@ namespace CatsAndMouseGame.Models
                 foreach (var figure in player.Figures)
                 {
 
-                    figure.CanMoveToPositions = new List<FigurePositionModel>();
+                    figure.CanMoveToPositions.Clear();
 
                     var moveUpwardsRowIndex = figure.Position.RowIndex - 1;
                     var moveDownwardsRowIndex = figure.Position.RowIndex + 1;
@@ -102,13 +111,13 @@ namespace CatsAndMouseGame.Models
                     {
 
                         //up-left
-                        if (this.IsNewPositionValid(moveUpwardsRowIndex, moveLeftwards))
+                        if (this.IsNewPositionValid(moveUpwardsRowIndex, moveLeftwards, occupiedPositions))
                         {
                             figure.AddCanMoveToPosition(moveUpwardsRowIndex, moveLeftwards);
                         }
 
                         //up-right
-                        if (this.IsNewPositionValid(moveUpwardsRowIndex, moveRightwards))
+                        if (this.IsNewPositionValid(moveUpwardsRowIndex, moveRightwards, occupiedPositions))
                         {
                             figure.AddCanMoveToPosition(moveUpwardsRowIndex, moveRightwards);
                         }
@@ -116,13 +125,13 @@ namespace CatsAndMouseGame.Models
                     }
 
                     //down-left
-                    if (this.IsNewPositionValid(moveDownwardsRowIndex, moveLeftwards))
+                    if (this.IsNewPositionValid(moveDownwardsRowIndex, moveLeftwards, occupiedPositions))
                     {
                         figure.AddCanMoveToPosition(moveDownwardsRowIndex, moveLeftwards);
                     }
 
                     //down-right
-                    if (this.IsNewPositionValid(moveDownwardsRowIndex, moveRightwards))
+                    if (this.IsNewPositionValid(moveDownwardsRowIndex, moveRightwards, occupiedPositions))
                     {
                         figure.AddCanMoveToPosition(moveDownwardsRowIndex, moveRightwards);
                     }
@@ -135,12 +144,7 @@ namespace CatsAndMouseGame.Models
 
         public bool CanMove(FigureModel figure, int rowIndex, int columnIndex)
         {
-            if (figure.CanMoveToPositions.Any(p => p.RowIndex == rowIndex && p.ColumnIndex == columnIndex))
-            {
-                return true;
-            }
-
-            return false;
+            return figure.CanMoveToPositions.Any(p => p.RowIndex == rowIndex && p.ColumnIndex == columnIndex);
         }
 
         public void Move(FigureModel figure, int rowIndex, int columnIndex)
@@ -150,6 +154,7 @@ namespace CatsAndMouseGame.Models
             RecalculateFiguresCanMoveToPositions();
 
             CheckForGameOver();
+            Touch();
         }
 
         public bool IsGameOver()
@@ -157,9 +162,9 @@ namespace CatsAndMouseGame.Models
             return this.Players.Any(p => p.IsWinner == true);
         }
 
-        public PlayerModel GetWinnerPlayer()
+        public PlayerModel? GetWinnerPlayer()
         {
-            return this.Players.Where(p => p.IsWinner).FirstOrDefault();
+            return this.Players.FirstOrDefault(p => p.IsWinner);
         }
 
         public void SetNextTurn()
@@ -167,9 +172,9 @@ namespace CatsAndMouseGame.Models
             this.Players.ForEach(p => p.IsTheirTurn = !p.IsTheirTurn);
         }
 
-        public PlayerModel GetCurrentTurnPlayer()
+        public PlayerModel? GetCurrentTurnPlayer()
         {
-            return this.Players.Where(p => p.IsTheirTurn).FirstOrDefault();
+            return this.Players.FirstOrDefault(p => p.IsTheirTurn);
         }
 
         public bool IsWaitingForSecondPlayer()
@@ -195,15 +200,16 @@ namespace CatsAndMouseGame.Models
             return this.IsGameOver() && !this.HasAnyPlayerLeft() && this.Players.All(p => p.WantsToRematch);
         }
 
-        public PlayerModel GetOpponentPlayer(PlayerModel player)
+        public PlayerModel? GetOpponentPlayer(PlayerModel player)
         {
-            return this.Players.Where(p => p.UserId != player.UserId).FirstOrDefault();
+            return this.Players.FirstOrDefault(p => p.UserId != player.UserId);
         }
 
         public void PlayerLeft(PlayerModel playerWhoLeft)
         {
 
             playerWhoLeft.HasUserLeftTheGame = true;
+            Touch();
 
             if (this.IsGameInProgress())
             {
@@ -213,17 +219,26 @@ namespace CatsAndMouseGame.Models
 
         public void PlayerSurrenders(PlayerModel playerWhoSurrenders) {
             playerWhoSurrenders.IsWinner = false;
-            var opponentPlayer = GetPlayerByTeam(playerWhoSurrenders.TeamId == TeamEnum.Cats ? TeamEnum.Mouse : TeamEnum.Cats);
+            var opponentPlayer = GetPlayerByTeam(playerWhoSurrenders.TeamId == TeamEnum.Cats ? TeamEnum.Mouse : TeamEnum.Cats)
+                ?? throw new InvalidOperationException("Opponent player does not exist");
             opponentPlayer.IsWinner = true;
 
             this.Players.ForEach(p => p.IsTheirTurn = false);
             this.DateFinished = DateTime.UtcNow;
+            Touch();
+        }
+
+        public void Touch()
+        {
+            this.LastActivityUtc = DateTime.UtcNow;
         }
 
         private void CheckForGameOver()
         {
-            var mousePlayer = GetPlayerByTeam(TeamEnum.Mouse) as MousePlayerModel;
-            var catsPlayer = GetPlayerByTeam(TeamEnum.Cats) as CatsPlayerModel;
+            var mousePlayer = GetPlayerByTeam(TeamEnum.Mouse) as MousePlayerModel
+                ?? throw new InvalidOperationException("Mouse player does not exist");
+            var catsPlayer = GetPlayerByTeam(TeamEnum.Cats) as CatsPlayerModel
+                ?? throw new InvalidOperationException("Cats player does not exist");
 
             if (mousePlayer.Figures[0].Position.RowIndex == 0)
             {
@@ -231,13 +246,14 @@ namespace CatsAndMouseGame.Models
             }
             else
             {
-                var nextTurnPlayer = (mousePlayer.IsTheirTurn ? catsPlayer as PlayerModel : mousePlayer as PlayerModel);
+                PlayerModel nextTurnPlayer = mousePlayer.IsTheirTurn ? catsPlayer : mousePlayer;
 
                 var canNextTurnPlayerMoveAnyFigure = nextTurnPlayer.Figures.Any(f => f.CanMoveToPositions.Any());
 
                 if (!canNextTurnPlayerMoveAnyFigure)
                 {
-                    var currentTurnPlayer = GetCurrentTurnPlayer();
+                    var currentTurnPlayer = GetCurrentTurnPlayer()
+                        ?? throw new InvalidOperationException("Current turn player does not exist");
                     currentTurnPlayer.IsWinner = true;
                 }
             }
@@ -249,9 +265,9 @@ namespace CatsAndMouseGame.Models
             }
         }
 
-        private PlayerModel GetPlayerByTeam(TeamEnum teamId)
+        private PlayerModel? GetPlayerByTeam(TeamEnum teamId)
         {
-            return this.Players.Where(p => p.TeamId == teamId).FirstOrDefault();
+            return this.Players.FirstOrDefault(p => p.TeamId == teamId);
         }
 
         private void SetPlayer(TeamEnum teamId, string userName, string userId)
@@ -261,9 +277,13 @@ namespace CatsAndMouseGame.Models
             {
                 player = new CatsPlayerModel();
             }
-            else
+            else if (teamId == TeamEnum.Mouse)
             {
                 player = new MousePlayerModel();
+            }
+            else
+            {
+                throw new InvalidOperationException("Team is invalid");
             }
 
             player.Name = userName;
@@ -272,7 +292,7 @@ namespace CatsAndMouseGame.Models
             this.Players.Add(player);
         }
 
-        private bool IsNewPositionValid(int rowIndex, int columnIndex)
+        private bool IsNewPositionValid(int rowIndex, int columnIndex, HashSet<(int RowIndex, int ColumnIndex)> occupiedPositions)
         {
 
             if (rowIndex < 0 || rowIndex > 7 || columnIndex < 0 || columnIndex > 7)
@@ -281,7 +301,7 @@ namespace CatsAndMouseGame.Models
                 return false;
             }
 
-            if (this.IsPositionCurrentlyTaken(rowIndex, columnIndex))
+            if (occupiedPositions.Contains((rowIndex, columnIndex)))
             {
                 return false;
             }
@@ -289,13 +309,6 @@ namespace CatsAndMouseGame.Models
             return true;
 
         }
-
-        private bool IsPositionCurrentlyTaken(int rowIndex, int columnIndex)
-        {
-            return this.Players.Any(p => p.Figures.Any(f => f.Position.RowIndex == rowIndex && f.Position.ColumnIndex == columnIndex));
-        }
-
-
 
     }
 }

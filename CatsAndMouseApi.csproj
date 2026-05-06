@@ -9,5 +9,12 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.2" />
   </ItemGroup>
-  
+
+  <ItemGroup>
+    <Compile Remove="CatsAndMouseApi.Tests/**/*.cs" />
+    <Content Remove="CatsAndMouseApi.Tests/**/*" />
+    <EmbeddedResource Remove="CatsAndMouseApi.Tests/**/*" />
+    <None Remove="CatsAndMouseApi.Tests/**/*" />
+  </ItemGroup>
+
 </Project>

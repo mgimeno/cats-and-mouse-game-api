@@ -1,15 +1,25 @@
 using System.Net;
 using CatsAndMouseGame.Hubs;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.ResponseCompression;
 
 var builder = WebApplication.CreateBuilder(args);
 var allowedOrigins = builder.Configuration
     .GetSection("AllowedOrigins")
-    .Get<string[]>();
+    .Get<string[]>()?
+    .Select(origin => origin.Trim().TrimEnd('/'))
+    .Where(origin => !string.IsNullOrWhiteSpace(origin))
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToArray();
 
 if (allowedOrigins == null || allowedOrigins.Length == 0)
 {
     throw new InvalidOperationException("AllowedOrigins is not configured");
+}
+
+if (allowedOrigins.Contains("*", StringComparer.Ordinal))
+{
+    throw new InvalidOperationException("AllowedOrigins cannot contain '*' because SignalR uses credentialed requests");
 }
 
 builder.Services.AddOpenApi();
@@ -39,7 +49,19 @@ builder.Services.AddCors(options =>
 
 builder.Services.AddControllers();
 
-builder.Services.AddSignalR()
+builder.Services.AddResponseCompression(options =>
+{
+    options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(new[] { "application/octet-stream" });
+});
+
+builder.Services.AddSignalR(options =>
+{
+    options.ClientTimeoutInterval = TimeSpan.FromSeconds(60);
+    options.HandshakeTimeout = TimeSpan.FromSeconds(15);
+    options.KeepAliveInterval = TimeSpan.FromSeconds(15);
+    options.MaximumReceiveMessageSize = 16 * 1024;
+    options.EnableDetailedErrors = builder.Environment.IsDevelopment();
+})
     .AddJsonProtocol(o =>
     {
         o.PayloadSerializerOptions.WriteIndented = false;
@@ -60,6 +82,8 @@ if (app.Environment.IsDevelopment())
 
 // MUST be first
 app.UseForwardedHeaders();
+
+app.UseResponseCompression();
 
 app.UseRouting();
 

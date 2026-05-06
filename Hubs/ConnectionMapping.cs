@@ -1,112 +1,87 @@
 ﻿namespace CatsAndMouseGame.Hubs
 {
-    public class ConnectionMapping<T>
+    public sealed class ConnectionMapping<T>
+        where T : notnull
     {
-        private readonly Dictionary<T, HashSet<string>> _connections =
-            new Dictionary<T, HashSet<string>>();
+        private readonly Dictionary<T, HashSet<string>> _connections = new();
+        private readonly Dictionary<string, T> _connectionToKey = new(StringComparer.Ordinal);
+        private readonly object _syncRoot = new();
 
-        public void Add(T key, string connectionId)
+        public int Add(T key, string connectionId)
         {
-            lock (_connections)
+            lock (_syncRoot)
             {
-                HashSet<string> connections;
-                if (!_connections.TryGetValue(key, out connections))
+                RemoveConnectionUnderLock(connectionId);
+
+                if (!_connections.TryGetValue(key, out var connections))
                 {
-                    connections = new HashSet<string>();
+                    connections = new HashSet<string>(StringComparer.Ordinal);
                     _connections.Add(key, connections);
                 }
 
-                lock (connections)
-                {
-                    connections.Add(connectionId);
-                }
+                connections.Add(connectionId);
+                _connectionToKey[connectionId] = key;
+                return connections.Count;
             }
         }
 
         public List<string> GetConnectionsByKey(T key)
         {
-            HashSet<string> connections;
-            if (_connections.TryGetValue(key, out connections))
+            lock (_syncRoot)
             {
-                return connections.ToList();
+                return _connections.TryGetValue(key, out var connections)
+                    ? connections.ToList()
+                    : new List<string>();
             }
-            
-            return new List<string>();
         }
 
         public List<string> GetAllConnections()
         {
-
-            var result = new List<string>();
-
-            HashSet<string> keyConnections;
-
-            foreach (var key in _connections.Keys)
+            lock (_syncRoot)
             {
-
-                if (_connections.TryGetValue(key, out keyConnections))
-                {
-                    foreach (var keyConnection in keyConnections)
-                    {
-                        result.Add(keyConnection);
-                    }
-                }
-            }
-            return result;
-        }
-
-        public T GetKeyByConnection(string value)
-        {
-
-            var connection = _connections.Where(c => c.Value.Any(v => v == value)).FirstOrDefault();
-
-            if (connection.Equals(default))
-            {
-
-                return default(T);
-            }
-            else
-            {
-                return connection.Key;
+                return _connections.Values.SelectMany(c => c).Distinct(StringComparer.Ordinal).ToList();
             }
         }
 
-        public RemoveConnectionResult<T> RemoveConnection(string connectionId)
+        public T? GetKeyByConnection(string connectionId)
         {
-            lock (_connections)
+            lock (_syncRoot)
             {
-                var connection = _connections.FirstOrDefault(k => k.Value.Any(c => c.Equals(connectionId)));
-
-                if (connection.Key == null)
-                {
-                    return null;
-                }
-
-                connection.Value.Remove(connectionId);
-
-                if (!connection.Value.Any())
-                {
-                    _connections.Remove(connection.Key);
-
-                    return new RemoveConnectionResult<T>
-                    {
-                        Key = connection.Key,
-                        HasOtherActiveConnections = false
-                    };
-                }
-
-                return new RemoveConnectionResult<T>
-                {
-                    Key = connection.Key,
-                    HasOtherActiveConnections = true
-                };
+                return _connectionToKey.TryGetValue(connectionId, out var key) ? key : default;
             }
+        }
+
+        public RemoveConnectionResult<T>? RemoveConnection(string connectionId)
+        {
+            lock (_syncRoot)
+            {
+                return RemoveConnectionUnderLock(connectionId);
+            }
+        }
+
+        private RemoveConnectionResult<T>? RemoveConnectionUnderLock(string connectionId)
+        {
+            if (!_connectionToKey.Remove(connectionId, out var key))
+            {
+                return null;
+            }
+
+            if (!_connections.TryGetValue(key, out var connections))
+            {
+                return null;
+            }
+
+            connections.Remove(connectionId);
+            var hasOtherActiveConnections = connections.Count > 0;
+
+            if (!hasOtherActiveConnections)
+            {
+                _connections.Remove(key);
+            }
+
+            return new RemoveConnectionResult<T>(key, hasOtherActiveConnections);
         }
     }
 
-    public class RemoveConnectionResult<T>
-    {
-        public T Key { get; set; }
-        public bool HasOtherActiveConnections { get; set; }
-    }
+    public sealed record RemoveConnectionResult<T>(T Key, bool HasOtherActiveConnections);
 }
