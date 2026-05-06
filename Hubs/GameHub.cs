@@ -250,9 +250,16 @@ namespace CatsAndMouseGame.Hubs
             lock (_gamesLock)
             {
                 PruneExpiredGames();
-                var game = GetRequiredInProgressGame(userId);
-                var player = GetRequiredPlayer(game, userId);
-                outgoingMessage = BuildGameStatusMessage(game, player, _connections.GetConnectionsByKey(userId));
+                var game = GetInProgressGameForUser(userId);
+                if (game == null)
+                {
+                    outgoingMessage = BuildHasInProgressGameMessage(userId, hasInProgressGame: false);
+                }
+                else
+                {
+                    var player = GetRequiredPlayer(game, userId);
+                    outgoingMessage = BuildGameStatusMessage(game, player, _connections.GetConnectionsByKey(userId));
+                }
             }
 
             return SendMessageAsync(outgoingMessage);

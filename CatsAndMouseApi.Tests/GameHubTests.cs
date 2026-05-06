@@ -42,6 +42,20 @@ public sealed class GameHubTests : IDisposable
     }
 
     [Fact]
+    public async Task SendInProgressGameStatusToCaller_without_game_sends_no_in_progress_game()
+    {
+        var hub = CreateHub("connection-1");
+        await hub.RegisterConnection("user-1");
+        _clients.Clear();
+
+        await hub.SendInProgressGameStatusToCaller();
+
+        var hasInProgressGame = _clients.SinglePayload<PlayerHasInProgressGameMessage>("HasInProgressGame", "connection-1");
+        Assert.False(hasInProgressGame.HasInProgressGame);
+        Assert.DoesNotContain(_clients.Messages, message => message.MethodName == "GameStatus");
+    }
+
+    [Fact]
     public async Task CreateGame_requires_registered_connection()
     {
         var hub = CreateHub("connection-1");
