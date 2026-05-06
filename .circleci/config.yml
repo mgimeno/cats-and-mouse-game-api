@@ -58,6 +58,9 @@ jobs:
             ssh $SSH_USER@$SSH_HOST "unzip -d << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >> << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>/<< pipeline.parameters.project-folder >>.zip"
             ssh $SSH_USER@$SSH_HOST "rm -f << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>/<< pipeline.parameters.project-folder >>.zip"
 
+            # Set permissions as executable
+            ssh $SSH_USER@$SSH_HOST "chmod +x << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>/CatsAndMouseApi"
+
             # Stop service, swap folders, start service
             ssh $SSH_USER@$SSH_HOST "sh << pipeline.parameters.server-base-folder >>scripts/stop-cats-and-mouse-api.sh"
             ssh $SSH_USER@$SSH_HOST "rm -rf << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >>"
