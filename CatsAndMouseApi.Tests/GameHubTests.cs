@@ -233,6 +233,29 @@ public sealed class GameHubTests : IDisposable
         Assert.Equal("You cannot cancel another player's game", exception.Message);
     }
 
+    [Fact]
+    public async Task PlayerWantsToRematch_when_both_players_agree_starts_new_game_with_swapped_teams()
+    {
+        var (catsHub, mouseHub, game) = await StartedHubGame();
+        await catsHub.Surrender();
+        _clients.Clear();
+
+        await catsHub.PlayerWantsToRematch(new GameIdModel { GameId = game.GameId });
+        await mouseHub.PlayerWantsToRematch(new GameIdModel { GameId = game.GameId });
+
+        var catsUserStatus = _clients.LastPayload<GameStatusMessage>("GameStatus", "cats-connection").GameStatus;
+        var mouseUserStatus = _clients.LastPayload<GameStatusMessage>("GameStatus", "mouse-connection").GameStatus;
+        var catsUserPlayer = catsUserStatus.Players[catsUserStatus.MyPlayerIndex];
+        var mouseUserPlayer = mouseUserStatus.Players[mouseUserStatus.MyPlayerIndex];
+
+        Assert.NotEqual(game.GameId, catsUserStatus.GameId);
+        Assert.Equal(catsUserStatus.GameId, mouseUserStatus.GameId);
+        Assert.Equal(TeamEnum.Mouse, catsUserPlayer.TeamId);
+        Assert.Equal(TeamEnum.Cats, mouseUserPlayer.TeamId);
+        Assert.True(catsUserPlayer.IsTheirTurn);
+        Assert.False(mouseUserPlayer.IsTheirTurn);
+    }
+
     private GameHub CreateHub(string connectionId)
     {
         return new GameHub

@@ -427,7 +427,7 @@ namespace CatsAndMouseGame.Hubs
                 if (game.IsReadyForRematch() && game.RematchGameId == null)
                 {
                     var rematchGame = CreateGameWithUniqueId();
-                    rematchGame.SetFirstPlayer(playerWhoWantsToRematch.TeamId, playerWhoWantsToRematch.Name, playerWhoWantsToRematch.UserId);
+                    rematchGame.SetFirstPlayer(GetOppositeTeam(playerWhoWantsToRematch.TeamId), playerWhoWantsToRematch.Name, playerWhoWantsToRematch.UserId);
                     rematchGame.SetSecondPlayer(opponentPlayer.Name, opponentPlayer.UserId);
                     rematchGame.Start();
 
@@ -731,6 +731,16 @@ namespace CatsAndMouseGame.Hubs
             {
                 throw new HubException("Team is invalid");
             }
+        }
+
+        private static TeamEnum GetOppositeTeam(TeamEnum teamId)
+        {
+            return teamId switch
+            {
+                TeamEnum.Cats => TeamEnum.Mouse,
+                TeamEnum.Mouse => TeamEnum.Cats,
+                _ => throw new HubException("Team is invalid")
+            };
         }
 
         private async Task SendMessagesAsync(IEnumerable<ClientMessage> messages)
