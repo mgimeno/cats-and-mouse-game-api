@@ -1,8 +1,9 @@
-﻿namespace CatsAndMouseGame.Models
+﻿namespace CatsAndMouseApi.Models
 {
     public class CatModel : FigureModel
     {
-        public CatModel() {
+        public CatModel()
+        {
             this.TypeId = Enums.FigureTypeEnum.Cat;
         }
     }

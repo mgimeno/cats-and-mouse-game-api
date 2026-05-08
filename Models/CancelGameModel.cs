@@ -1,6 +1,6 @@
-﻿namespace CatsAndMouseGame.Models
+﻿namespace CatsAndMouseApi.Models
 {
-    public class CancelGameModel 
+    public class CancelGameModel
     {
         public string GameId { get; set; } = string.Empty;
         public string UserId { get; set; } = string.Empty;

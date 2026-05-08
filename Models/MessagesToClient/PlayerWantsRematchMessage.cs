@@ -1,7 +1,7 @@
-﻿using CatsAndMouseGame.Enums;
-using CatsAndMouseGame.Hubs;
+﻿using CatsAndMouseApi.Enums;
+using CatsAndMouseApi.Interfaces;
 
-namespace CatsAndMouseGame.Models
+namespace CatsAndMouseApi.Models.MessagesToClient
 {
     public class PlayerWantsRematchMessage : IMessageToClient
     {

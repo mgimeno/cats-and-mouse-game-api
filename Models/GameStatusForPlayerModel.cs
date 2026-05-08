@@ -1,11 +1,9 @@
-﻿using System.Collections.Generic;
-
-namespace CatsAndMouseGame.Models
+﻿namespace CatsAndMouseApi.Models
 {
     public class GameStatusForPlayerModel
     {
         public string GameId { get; set; } = string.Empty;
-        public List<PlayerModel> Players { get; set; } = new();
+        public List<PlayerModel> Players { get; set; } = [];
         public int MyPlayerIndex { get; set; }
     }
 }

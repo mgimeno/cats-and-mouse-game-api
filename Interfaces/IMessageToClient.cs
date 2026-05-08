@@ -1,9 +1,6 @@
-﻿
+﻿using CatsAndMouseApi.Enums;
 
-
-using CatsAndMouseGame.Enums;
-
-namespace CatsAndMouseGame.Hubs
+namespace CatsAndMouseApi.Interfaces
 {
     public interface IMessageToClient
     {

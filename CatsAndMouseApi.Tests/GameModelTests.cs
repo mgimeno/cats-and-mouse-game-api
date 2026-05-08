@@ -1,5 +1,5 @@
-using CatsAndMouseGame.Enums;
-using CatsAndMouseGame.Models;
+using CatsAndMouseApi.Enums;
+using CatsAndMouseApi.Models;
 
 namespace CatsAndMouseApi.Tests;
 
@@ -94,6 +94,18 @@ public sealed class GameModelTests
 
         var exception = Assert.Throws<InvalidOperationException>(() => game.Start());
         Assert.Equal("Mouse player does not exist", exception.Message);
+    }
+
+    [Fact]
+    public void RecalculateFiguresCanMoveToPositions_ignores_out_of_bounds_current_positions()
+    {
+        var game = StartedGame();
+        var cats = game.Players.Single(p => p.TeamId == TeamEnum.Cats);
+        cats.Figures[0].ChangePosition(rowIndex: -1, columnIndex: 9);
+
+        var exception = Record.Exception(game.RecalculateFiguresCanMoveToPositions);
+
+        Assert.Null(exception);
     }
 
     private static GameModel StartedGame()

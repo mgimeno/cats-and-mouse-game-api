@@ -11,12 +11,12 @@ parameters:
     default: "/home/$SSH_USER/apps/"
   build-dist-folder:
     type: string
-    default: "bin/Release/net9.0/publish"
+    default: "bin/Release/net10.0/publish"
 
 jobs:
   build:
     docker:
-      - image: mcr.microsoft.com/dotnet/sdk:9.0
+      - image: mcr.microsoft.com/dotnet/sdk:10.0
     working_directory: ~/<< pipeline.parameters.project-folder >>
     steps:
       - checkout
@@ -25,7 +25,7 @@ jobs:
           command: dotnet test CatsAndMouseApi.sln --configuration Release
       - run:
           name: Publish
-          command: dotnet publish --configuration Release --output bin/Release/net9.0/publish
+          command: dotnet publish --configuration Release --output bin/Release/net10.0/publish
       - persist_to_workspace:
           root: ~/<< pipeline.parameters.project-folder >>
           paths:

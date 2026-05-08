@@ -1,4 +1,4 @@
-﻿namespace CatsAndMouseGame.Enums
+﻿namespace CatsAndMouseApi.Enums
 {
     public enum MessageToClientTypeEnum
     {

@@ -1,9 +1,10 @@
 using System.Collections;
 using System.Reflection;
 using System.Security.Claims;
-using CatsAndMouseGame.Enums;
-using CatsAndMouseGame.Hubs;
-using CatsAndMouseGame.Models;
+using CatsAndMouseApi.Enums;
+using CatsAndMouseApi.Hubs;
+using CatsAndMouseApi.Models;
+using CatsAndMouseApi.Models.MessagesToClient;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.SignalR;
 
@@ -331,7 +332,7 @@ internal sealed class RecordingClientProxy(
 {
     public Task SendCoreAsync(string method, object?[] args, CancellationToken cancellationToken = default)
     {
-        messages.Add(new SentClientMessage(method, connectionIds.ToArray(), args));
+        messages.Add(new SentClientMessage(method, [.. connectionIds], args));
         return Task.CompletedTask;
     }
 }

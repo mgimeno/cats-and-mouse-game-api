@@ -1,13 +1,12 @@
-﻿using CatsAndMouseGame.Enums;
-using CatsAndMouseGame.Hubs;
-using System.Collections.Generic;
+﻿using CatsAndMouseApi.Enums;
+using CatsAndMouseApi.Interfaces;
 
-namespace CatsAndMouseGame.Models
+namespace CatsAndMouseApi.Models.MessagesToClient
 {
     public class GameListMessage : IMessageToClient
     {
         public MessageToClientTypeEnum TypeId { get; } = MessageToClientTypeEnum.GameList;
         public bool IsMessageForChat { get; } = false;
-        public List<GameListItem> GameList { get; set; } = new List<GameListItem>();
+        public List<GameListItem> GameList { get; set; } = [];
     }
 }

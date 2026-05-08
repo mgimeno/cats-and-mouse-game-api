@@ -1,19 +1,18 @@
-﻿
-using CatsAndMouseGame.Enums;
-using CatsAndMouseGame.Hubs;
-using System;
-using System.Collections.Generic;
-using System.Linq;
+﻿using CatsAndMouseApi.Enums;
+using CatsAndMouseApi.Interfaces;
 
-namespace CatsAndMouseGame.Models
+namespace CatsAndMouseApi.Models
 {
     public class GameModel
     {
+        private const int BoardSize = 8;
+        private const int BoardSquareCount = BoardSize * BoardSize;
+
         public string Id { get; set; }
         public string? Password { get; set; }
         public string? RematchGameId { get; set; }
         public List<PlayerModel> Players { get; set; }
-        public List<IMessageToClient> ChatMessages { get; set; } 
+        public List<IMessageToClient> ChatMessages { get; set; }
         public DateTime DateCreated { get; set; }
         public DateTime LastActivityUtc { get; set; }
         public DateTime? DateStarted { get; set; } = null;
@@ -24,8 +23,8 @@ namespace CatsAndMouseGame.Models
             this.Id = Guid.NewGuid().ToString("N")[..5];
             this.Password = gamePassword;
 
-            this.Players = new List<PlayerModel>();
-            this.ChatMessages = new List<IMessageToClient>();
+            this.Players = new List<PlayerModel>(2);
+            this.ChatMessages = [];
 
             this.DateCreated = DateTime.UtcNow;
             this.LastActivityUtc = this.DateCreated;
@@ -50,7 +49,15 @@ namespace CatsAndMouseGame.Models
 
         public bool IsTeamAlreadyConnected(TeamEnum teamId)
         {
-            return this.Players.Any(p => p.TeamId == teamId);
+            foreach (var player in this.Players)
+            {
+                if (player.TeamId == teamId)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         public void Start()
@@ -67,7 +74,15 @@ namespace CatsAndMouseGame.Models
 
         public PlayerModel? GetPlayerByUserId(string userId)
         {
-            return this.Players.FirstOrDefault(p => p.UserId == userId);
+            foreach (var player in this.Players)
+            {
+                if (player.UserId == userId)
+                {
+                    return player;
+                }
+            }
+
+            return null;
         }
 
         public FigureModel? GetPlayerFigure(PlayerModel? player, int figureId)
@@ -77,28 +92,49 @@ namespace CatsAndMouseGame.Models
                 return null;
             }
 
-            return player.Figures.FirstOrDefault(c => c.Id == figureId);
+            foreach (var figure in player.Figures)
+            {
+                if (figure.Id == figureId)
+                {
+                    return figure;
+                }
+            }
+
+            return null;
         }
 
         public List<string> GetPlayersUsersIds()
         {
-            return this.Players.Select(p => p.UserId).ToList();
+            var userIds = new List<string>(this.Players.Count);
+            foreach (var player in this.Players)
+            {
+                userIds.Add(player.UserId);
+            }
+
+            return userIds;
         }
 
 
         public void RecalculateFiguresCanMoveToPositions()
         {
-            var occupiedPositions = this.Players
-                .SelectMany(p => p.Figures)
-                .Select(f => (f.Position.RowIndex, f.Position.ColumnIndex))
-                .ToHashSet();
+            Span<bool> occupiedPositions = stackalloc bool[BoardSquareCount];
+            occupiedPositions.Clear();
 
             foreach (var player in this.Players)
             {
-
                 foreach (var figure in player.Figures)
                 {
+                    if (TryGetBoardIndex(figure.Position.RowIndex, figure.Position.ColumnIndex, out var boardIndex))
+                    {
+                        occupiedPositions[boardIndex] = true;
+                    }
+                }
+            }
 
+            foreach (var player in this.Players)
+            {
+                foreach (var figure in player.Figures)
+                {
                     figure.CanMoveToPositions.Clear();
 
                     var moveUpwardsRowIndex = figure.Position.RowIndex - 1;
@@ -111,13 +147,13 @@ namespace CatsAndMouseGame.Models
                     {
 
                         //up-left
-                        if (this.IsNewPositionValid(moveUpwardsRowIndex, moveLeftwards, occupiedPositions))
+                        if (IsNewPositionValid(moveUpwardsRowIndex, moveLeftwards, occupiedPositions))
                         {
                             figure.AddCanMoveToPosition(moveUpwardsRowIndex, moveLeftwards);
                         }
 
                         //up-right
-                        if (this.IsNewPositionValid(moveUpwardsRowIndex, moveRightwards, occupiedPositions))
+                        if (IsNewPositionValid(moveUpwardsRowIndex, moveRightwards, occupiedPositions))
                         {
                             figure.AddCanMoveToPosition(moveUpwardsRowIndex, moveRightwards);
                         }
@@ -125,13 +161,13 @@ namespace CatsAndMouseGame.Models
                     }
 
                     //down-left
-                    if (this.IsNewPositionValid(moveDownwardsRowIndex, moveLeftwards, occupiedPositions))
+                    if (IsNewPositionValid(moveDownwardsRowIndex, moveLeftwards, occupiedPositions))
                     {
                         figure.AddCanMoveToPosition(moveDownwardsRowIndex, moveLeftwards);
                     }
 
                     //down-right
-                    if (this.IsNewPositionValid(moveDownwardsRowIndex, moveRightwards, occupiedPositions))
+                    if (IsNewPositionValid(moveDownwardsRowIndex, moveRightwards, occupiedPositions))
                     {
                         figure.AddCanMoveToPosition(moveDownwardsRowIndex, moveRightwards);
                     }
@@ -144,7 +180,15 @@ namespace CatsAndMouseGame.Models
 
         public bool CanMove(FigureModel figure, int rowIndex, int columnIndex)
         {
-            return figure.CanMoveToPositions.Any(p => p.RowIndex == rowIndex && p.ColumnIndex == columnIndex);
+            foreach (var position in figure.CanMoveToPositions)
+            {
+                if (position.RowIndex == rowIndex && position.ColumnIndex == columnIndex)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         public void Move(FigureModel figure, int rowIndex, int columnIndex)
@@ -159,22 +203,49 @@ namespace CatsAndMouseGame.Models
 
         public bool IsGameOver()
         {
-            return this.Players.Any(p => p.IsWinner == true);
+            foreach (var player in this.Players)
+            {
+                if (player.IsWinner)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         public PlayerModel? GetWinnerPlayer()
         {
-            return this.Players.FirstOrDefault(p => p.IsWinner);
+            foreach (var player in this.Players)
+            {
+                if (player.IsWinner)
+                {
+                    return player;
+                }
+            }
+
+            return null;
         }
 
         public void SetNextTurn()
         {
-            this.Players.ForEach(p => p.IsTheirTurn = !p.IsTheirTurn);
+            foreach (var player in this.Players)
+            {
+                player.IsTheirTurn = !player.IsTheirTurn;
+            }
         }
 
         public PlayerModel? GetCurrentTurnPlayer()
         {
-            return this.Players.FirstOrDefault(p => p.IsTheirTurn);
+            foreach (var player in this.Players)
+            {
+                if (player.IsTheirTurn)
+                {
+                    return player;
+                }
+            }
+
+            return null;
         }
 
         public bool IsWaitingForSecondPlayer()
@@ -192,17 +263,48 @@ namespace CatsAndMouseGame.Models
             return !string.IsNullOrWhiteSpace(this.Password);
         }
 
-        public bool HasAnyPlayerLeft() {
-            return this.Players.Any(p => p.HasUserLeftTheGame);
+        public bool HasAnyPlayerLeft()
+        {
+            foreach (var player in this.Players)
+            {
+                if (player.HasUserLeftTheGame)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
-        public bool IsReadyForRematch() {
-            return this.IsGameOver() && !this.HasAnyPlayerLeft() && this.Players.All(p => p.WantsToRematch);
+        public bool IsReadyForRematch()
+        {
+            if (!this.IsGameOver() || this.HasAnyPlayerLeft())
+            {
+                return false;
+            }
+
+            foreach (var player in this.Players)
+            {
+                if (!player.WantsToRematch)
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         public PlayerModel? GetOpponentPlayer(PlayerModel player)
         {
-            return this.Players.FirstOrDefault(p => p.UserId != player.UserId);
+            foreach (var opponent in this.Players)
+            {
+                if (opponent.UserId != player.UserId)
+                {
+                    return opponent;
+                }
+            }
+
+            return null;
         }
 
         public void PlayerLeft(PlayerModel playerWhoLeft)
@@ -217,13 +319,18 @@ namespace CatsAndMouseGame.Models
             }
         }
 
-        public void PlayerSurrenders(PlayerModel playerWhoSurrenders) {
+        public void PlayerSurrenders(PlayerModel playerWhoSurrenders)
+        {
             playerWhoSurrenders.IsWinner = false;
             var opponentPlayer = GetPlayerByTeam(playerWhoSurrenders.TeamId == TeamEnum.Cats ? TeamEnum.Mouse : TeamEnum.Cats)
                 ?? throw new InvalidOperationException("Opponent player does not exist");
             opponentPlayer.IsWinner = true;
 
-            this.Players.ForEach(p => p.IsTheirTurn = false);
+            foreach (var player in this.Players)
+            {
+                player.IsTheirTurn = false;
+            }
+
             this.DateFinished = DateTime.UtcNow;
             Touch();
         }
@@ -248,7 +355,15 @@ namespace CatsAndMouseGame.Models
             {
                 PlayerModel nextTurnPlayer = mousePlayer.IsTheirTurn ? catsPlayer : mousePlayer;
 
-                var canNextTurnPlayerMoveAnyFigure = nextTurnPlayer.Figures.Any(f => f.CanMoveToPositions.Any());
+                var canNextTurnPlayerMoveAnyFigure = false;
+                foreach (var figure in nextTurnPlayer.Figures)
+                {
+                    if (figure.CanMoveToPositions.Count > 0)
+                    {
+                        canNextTurnPlayerMoveAnyFigure = true;
+                        break;
+                    }
+                }
 
                 if (!canNextTurnPlayerMoveAnyFigure)
                 {
@@ -260,14 +375,26 @@ namespace CatsAndMouseGame.Models
 
             if (IsGameOver())
             {
-                Players.ForEach(p => p.IsTheirTurn = false);
+                foreach (var player in Players)
+                {
+                    player.IsTheirTurn = false;
+                }
+
                 this.DateFinished = DateTime.UtcNow;
             }
         }
 
         private PlayerModel? GetPlayerByTeam(TeamEnum teamId)
         {
-            return this.Players.FirstOrDefault(p => p.TeamId == teamId);
+            foreach (var player in this.Players)
+            {
+                if (player.TeamId == teamId)
+                {
+                    return player;
+                }
+            }
+
+            return null;
         }
 
         private void SetPlayer(TeamEnum teamId, string userName, string userId)
@@ -292,22 +419,27 @@ namespace CatsAndMouseGame.Models
             this.Players.Add(player);
         }
 
-        private bool IsNewPositionValid(int rowIndex, int columnIndex, HashSet<(int RowIndex, int ColumnIndex)> occupiedPositions)
+        private static bool IsNewPositionValid(int rowIndex, int columnIndex, ReadOnlySpan<bool> occupiedPositions)
         {
-
-            if (rowIndex < 0 || rowIndex > 7 || columnIndex < 0 || columnIndex > 7)
-            {
-                //Position is out of the chess board
-                return false;
-            }
-
-            if (occupiedPositions.Contains((rowIndex, columnIndex)))
+            if (!TryGetBoardIndex(rowIndex, columnIndex, out var boardIndex))
             {
                 return false;
             }
 
+            return !occupiedPositions[boardIndex];
+
+        }
+
+        private static bool TryGetBoardIndex(int rowIndex, int columnIndex, out int boardIndex)
+        {
+            if ((uint)rowIndex >= BoardSize || (uint)columnIndex >= BoardSize)
+            {
+                boardIndex = -1;
+                return false;
+            }
+
+            boardIndex = (rowIndex * BoardSize) + columnIndex;
             return true;
-
         }
 
     }

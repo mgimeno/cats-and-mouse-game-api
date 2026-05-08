@@ -1,11 +1,11 @@
-﻿namespace CatsAndMouseGame.Hubs
+﻿namespace CatsAndMouseApi.Hubs
 {
     public sealed class ConnectionMapping<T>
         where T : notnull
     {
-        private readonly Dictionary<T, HashSet<string>> _connections = new();
+        private readonly Dictionary<T, HashSet<string>> _connections = [];
         private readonly Dictionary<string, T> _connectionToKey = new(StringComparer.Ordinal);
-        private readonly object _syncRoot = new();
+        private readonly Lock _syncRoot = new();
 
         public int Add(T key, string connectionId)
         {
@@ -29,9 +29,18 @@
         {
             lock (_syncRoot)
             {
-                return _connections.TryGetValue(key, out var connections)
-                    ? connections.ToList()
-                    : new List<string>();
+                if (!_connections.TryGetValue(key, out var connections))
+                {
+                    return [];
+                }
+
+                var result = new List<string>(connections.Count);
+                foreach (var connection in connections)
+                {
+                    result.Add(connection);
+                }
+
+                return result;
             }
         }
 
@@ -39,7 +48,13 @@
         {
             lock (_syncRoot)
             {
-                return _connections.Values.SelectMany(c => c).Distinct(StringComparer.Ordinal).ToList();
+                var result = new List<string>(_connectionToKey.Count);
+                foreach (var connectionId in _connectionToKey.Keys)
+                {
+                    result.Add(connectionId);
+                }
+
+                return result;
             }
         }
 

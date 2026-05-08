@@ -1,5 +1,6 @@
+using System.IO.Compression;
 using System.Net;
-using CatsAndMouseGame.Hubs;
+using CatsAndMouseApi.Hubs;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.ResponseCompression;
 
@@ -31,7 +32,7 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
         ForwardedHeaders.XForwardedProto;
 
     // Trust NGINX
-    options.KnownNetworks.Clear();
+    options.KnownIPNetworks.Clear();
     options.KnownProxies.Clear();
 });
 
@@ -49,10 +50,21 @@ builder.Services.AddCors(options =>
 
 builder.Services.AddControllers();
 
-builder.Services.AddResponseCompression(options =>
+if (builder.Environment.IsDevelopment())
 {
-    options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(new[] { "application/octet-stream" });
-});
+    builder.Services.AddResponseCompression(options =>
+    {
+        options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(["application/octet-stream"]);
+    });
+    builder.Services.Configure<BrotliCompressionProviderOptions>(options =>
+    {
+        options.Level = CompressionLevel.Fastest;
+    });
+    builder.Services.Configure<GzipCompressionProviderOptions>(options =>
+    {
+        options.Level = CompressionLevel.Fastest;
+    });
+}
 
 builder.Services.AddSignalR(options =>
 {
@@ -83,7 +95,10 @@ if (app.Environment.IsDevelopment())
 // MUST be first
 app.UseForwardedHeaders();
 
-app.UseResponseCompression();
+if (app.Environment.IsDevelopment())
+{
+    app.UseResponseCompression();
+}
 
 app.UseRouting();
 

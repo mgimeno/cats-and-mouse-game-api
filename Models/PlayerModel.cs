@@ -1,7 +1,6 @@
-﻿using CatsAndMouseGame.Enums;
-using System.Collections.Generic;
+﻿using CatsAndMouseApi.Enums;
 
-namespace CatsAndMouseGame.Models
+namespace CatsAndMouseApi.Models
 {
     public class PlayerModel
     {
@@ -16,9 +15,10 @@ namespace CatsAndMouseGame.Models
         public bool HasUserLeftTheGame { get; set; } = false;
         public bool WantsToRematch { get; set; } = false;
 
-        public PlayerModel() {
-            this.Figures = new List<FigureModel>();
+        public PlayerModel()
+        {
+            this.Figures = new List<FigureModel>(4);
         }
-        
+
     }
 }

@@ -1,4 +1,4 @@
-using CatsAndMouseGame.Hubs;
+using CatsAndMouseApi.Hubs;
 
 namespace CatsAndMouseApi.Tests;
 

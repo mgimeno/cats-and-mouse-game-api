@@ -1,9 +1,11 @@
-﻿using CatsAndMouseGame.Enums;
-using CatsAndMouseGame.Models;
+﻿using CatsAndMouseApi.Enums;
+using CatsAndMouseApi.Interfaces;
+using CatsAndMouseApi.Models;
+using CatsAndMouseApi.Models.MessagesToClient;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.SignalR;
 
-namespace CatsAndMouseGame.Hubs
+namespace CatsAndMouseApi.Hubs
 {
     [EnableCors("CorsPolicy")]
     public class GameHub : Hub
@@ -15,8 +17,8 @@ namespace CatsAndMouseGame.Hubs
         private static readonly TimeSpan FinishedGameLifetime = TimeSpan.FromHours(2);
         private static readonly TimeSpan InactiveGameLifetime = TimeSpan.FromHours(12);
 
-        private static readonly List<GameModel> _games = new();
-        private static readonly object _gamesLock = new();
+        private static readonly List<GameModel> _games = [];
+        private static readonly Lock _gamesLock = new();
         private static readonly ConnectionMapping<string> _connections = new();
 
         public Task RegisterConnection(string userId)
@@ -107,7 +109,7 @@ namespace CatsAndMouseGame.Hubs
             lock (_gamesLock)
             {
                 PruneExpiredGames();
-                if (_games.Any(g => g.IsWaitingForSecondPlayer() && g.GetPlayerByUserId(userId) != null))
+                if (HasWaitingGameForUser(userId))
                 {
                     throw new HubException("You are already creating another game");
                 }
@@ -136,12 +138,7 @@ namespace CatsAndMouseGame.Hubs
             lock (_gamesLock)
             {
                 PruneExpiredGames();
-                var game = _games.FirstOrDefault(g => string.Equals(g.Id, gameId, StringComparison.Ordinal));
-                if (game == null)
-                {
-                    throw new HubException("Game does not exist");
-                }
-
+                var game = GetGameById(gameId) ?? throw new HubException("Game does not exist");
                 if (game.IsPasswordProtected() && !string.Equals(game.Password, model.GamePassword, StringComparison.Ordinal))
                 {
                     throw new HubException("Game password is invalid");
@@ -190,12 +187,7 @@ namespace CatsAndMouseGame.Hubs
                     throw new HubException("It's not your turn");
                 }
 
-                var figure = game.GetPlayerFigure(player, model.FigureId);
-                if (figure == null)
-                {
-                    throw new HubException("Figure does not exist");
-                }
-
+                var figure = game.GetPlayerFigure(player, model.FigureId) ?? throw new HubException("Figure does not exist");
                 if (!game.CanMove(figure, model.RowIndex, model.ColumnIndex))
                 {
                     throw new HubException("This figure cannot be moved to that position");
@@ -326,12 +318,7 @@ namespace CatsAndMouseGame.Hubs
                 PruneExpiredGames();
                 var game = GetRequiredGameForUser(model.GameId, userId);
                 var playerWhoLeft = GetRequiredPlayer(game, userId);
-                var opponentPlayer = game.GetOpponentPlayer(playerWhoLeft);
-                if (opponentPlayer == null)
-                {
-                    throw new HubException("Opponent does not exist");
-                }
-
+                var opponentPlayer = game.GetOpponentPlayer(playerWhoLeft) ?? throw new HubException("Opponent does not exist");
                 var message = new PlayerHasLeftGameMessage
                 {
                     GameId = game.Id,
@@ -402,12 +389,7 @@ namespace CatsAndMouseGame.Hubs
                 }
 
                 var playerWhoWantsToRematch = GetRequiredPlayer(game, userId);
-                var opponentPlayer = game.GetOpponentPlayer(playerWhoWantsToRematch);
-                if (opponentPlayer == null)
-                {
-                    throw new HubException("Opponent does not exist");
-                }
-
+                var opponentPlayer = game.GetOpponentPlayer(playerWhoWantsToRematch) ?? throw new HubException("Opponent does not exist");
                 if (!playerWhoWantsToRematch.WantsToRematch)
                 {
                     playerWhoWantsToRematch.WantsToRematch = true;
@@ -462,14 +444,61 @@ namespace CatsAndMouseGame.Hubs
             {
                 game = new GameModel(gamePassword);
             }
-            while (_games.Any(g => string.Equals(g.Id, game.Id, StringComparison.Ordinal)));
+            while (GameIdExists(game.Id));
 
             return game;
         }
 
+        private static bool GameIdExists(string gameId)
+        {
+            foreach (var game in _games)
+            {
+                if (string.Equals(game.Id, gameId, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static GameModel? GetGameById(string gameId)
+        {
+            foreach (var game in _games)
+            {
+                if (string.Equals(game.Id, gameId, StringComparison.Ordinal))
+                {
+                    return game;
+                }
+            }
+
+            return null;
+        }
+
+        private static bool HasWaitingGameForUser(string userId)
+        {
+            foreach (var game in _games)
+            {
+                if (game.IsWaitingForSecondPlayer() && game.GetPlayerByUserId(userId) != null)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         private static GameModel? GetInProgressGameForUser(string userId)
         {
-            return _games.FirstOrDefault(g => g.IsGameInProgress() && g.Players.Any(p => p.UserId == userId));
+            foreach (var game in _games)
+            {
+                if (game.IsGameInProgress() && game.GetPlayerByUserId(userId) != null)
+                {
+                    return game;
+                }
+            }
+
+            return null;
         }
 
         private static GameModel GetRequiredInProgressGame(string userId)
@@ -481,10 +510,16 @@ namespace CatsAndMouseGame.Hubs
         {
             gameId = NormalizeRequired(gameId, "Game id is required");
 
-            return _games.FirstOrDefault(g =>
-                    string.Equals(g.Id, gameId, StringComparison.Ordinal) &&
-                    g.Players.Any(p => p.UserId == userId))
-                ?? throw new HubException("Game does not exist");
+            foreach (var game in _games)
+            {
+                if (string.Equals(game.Id, gameId, StringComparison.Ordinal) &&
+                    game.GetPlayerByUserId(userId) != null)
+                {
+                    return game;
+                }
+            }
+
+            throw new HubException("Game does not exist");
         }
 
         private static PlayerModel GetRequiredPlayer(GameModel game, string userId)
@@ -494,34 +529,37 @@ namespace CatsAndMouseGame.Hubs
 
         private static bool CancelWaitingGamesCreatedByUser(string userId)
         {
-            var gamesToRemove = _games
-                .Where(g => g.IsWaitingForSecondPlayer() && g.GetPlayerByUserId(userId) != null)
-                .ToList();
-
-            foreach (var game in gamesToRemove)
+            var removed = false;
+            for (var i = _games.Count - 1; i >= 0; i--)
             {
-                _games.Remove(game);
+                var game = _games[i];
+                if (game.IsWaitingForSecondPlayer() && game.GetPlayerByUserId(userId) != null)
+                {
+                    _games.RemoveAt(i);
+                    removed = true;
+                }
             }
 
-            return gamesToRemove.Count > 0;
+            return removed;
         }
 
         private static bool CancelWaitingGame(string gameId, string userId)
         {
             gameId = NormalizeRequired(gameId, "Game id is required");
 
-            var game = _games.FirstOrDefault(g =>
-                string.Equals(g.Id, gameId, StringComparison.Ordinal) &&
-                g.IsWaitingForSecondPlayer() &&
-                g.GetPlayerByUserId(userId) != null);
-
-            if (game == null)
+            for (var i = 0; i < _games.Count; i++)
             {
-                return false;
+                var game = _games[i];
+                if (string.Equals(game.Id, gameId, StringComparison.Ordinal) &&
+                    game.IsWaitingForSecondPlayer() &&
+                    game.GetPlayerByUserId(userId) != null)
+                {
+                    _games.RemoveAt(i);
+                    return true;
+                }
             }
 
-            _games.Remove(game);
-            return true;
+            return false;
         }
 
         private static void AddChatMessage(GameModel game, IMessageToClient message)
@@ -550,16 +588,30 @@ namespace CatsAndMouseGame.Hubs
                 return;
             }
 
-            var removableGames = _games
-                .Where(game => !game.IsGameInProgress())
-                .OrderBy(game => game.LastActivityUtc)
-                .Take(excessGameCount)
-                .ToList();
-
-            foreach (var game in removableGames)
+            var removableGames = new List<GameModel>(_games.Count);
+            foreach (var game in _games)
             {
-                _games.Remove(game);
+                if (!game.IsGameInProgress())
+                {
+                    removableGames.Add(game);
+                }
             }
+
+            if (removableGames.Count == 0)
+            {
+                return;
+            }
+
+            removableGames.Sort(static (left, right) => left.LastActivityUtc.CompareTo(right.LastActivityUtc));
+
+            var removeCount = Math.Min(excessGameCount, removableGames.Count);
+            var gamesToRemove = new HashSet<GameModel>();
+            for (var i = 0; i < removeCount; i++)
+            {
+                gamesToRemove.Add(removableGames[i]);
+            }
+
+            _games.RemoveAll(gamesToRemove.Contains);
         }
 
         private static ClientMessage BuildHasInProgressGameMessage(string userId, bool hasInProgressGame)
@@ -580,11 +632,24 @@ namespace CatsAndMouseGame.Hubs
 
         private static List<GameListItem> BuildGamesAwaitingForSecondPlayer()
         {
-            return _games
-                .Where(g => g.IsWaitingForSecondPlayer())
-                .OrderByDescending(g => g.DateCreated)
-                .Select(BuildGameListItem)
-                .ToList();
+            var waitingGames = new List<GameModel>();
+            foreach (var game in _games)
+            {
+                if (game.IsWaitingForSecondPlayer())
+                {
+                    waitingGames.Add(game);
+                }
+            }
+
+            waitingGames.Sort(static (left, right) => right.DateCreated.CompareTo(left.DateCreated));
+
+            var gameList = new List<GameListItem>(waitingGames.Count);
+            foreach (var game in waitingGames)
+            {
+                gameList.Add(BuildGameListItem(game));
+            }
+
+            return gameList;
         }
 
         private static GameListItem BuildGameListItem(GameModel game)
@@ -602,16 +667,42 @@ namespace CatsAndMouseGame.Hubs
 
         private static List<ClientMessage> BuildGameStatusMessagesForAllPlayers(GameModel game)
         {
-            return game.Players
-                .Select(player => BuildGameStatusMessage(game, player, _connections.GetConnectionsByKey(player.UserId)))
-                .ToList();
+            var messages = new List<ClientMessage>(game.Players.Count);
+            var players = ClonePlayers(game.Players);
+
+            for (var i = 0; i < game.Players.Count; i++)
+            {
+                messages.Add(BuildGameStatusMessage(
+                    game.Id,
+                    players,
+                    i,
+                    _connections.GetConnectionsByKey(game.Players[i].UserId)));
+            }
+
+            return messages;
         }
 
         private static ClientMessage BuildGameStatusMessage(GameModel game, PlayerModel player, List<string> connectionIds)
         {
-            var players = game.Players.Select(ClonePlayer).ToList();
-            var myPlayerIndex = game.Players.IndexOf(player);
+            var myPlayerIndex = -1;
+            for (var i = 0; i < game.Players.Count; i++)
+            {
+                if (ReferenceEquals(game.Players[i], player))
+                {
+                    myPlayerIndex = i;
+                    break;
+                }
+            }
 
+            return BuildGameStatusMessage(game.Id, ClonePlayers(game.Players), myPlayerIndex, connectionIds);
+        }
+
+        private static ClientMessage BuildGameStatusMessage(
+            string gameId,
+            List<PlayerModel> players,
+            int myPlayerIndex,
+            List<string> connectionIds)
+        {
             return new ClientMessage(
                 "GameStatus",
                 connectionIds,
@@ -619,7 +710,7 @@ namespace CatsAndMouseGame.Hubs
                 {
                     GameStatus = new GameStatusForPlayerModel
                     {
-                        GameId = game.Id,
+                        GameId = gameId,
                         Players = players,
                         MyPlayerIndex = myPlayerIndex
                     }
@@ -649,10 +740,16 @@ namespace CatsAndMouseGame.Hubs
         private static List<ClientMessage> BuildChatHistoryMessages(GameModel game, string connectionId)
         {
             var connectionIds = new List<string> { connectionId };
-            return game.ChatMessages
-                .Where(chatMessage => chatMessage.IsMessageForChat)
-                .Select(message => new ClientMessage(GetClientMethodName(message.TypeId), connectionIds, message))
-                .ToList();
+            var messages = new List<ClientMessage>(game.ChatMessages.Count);
+            foreach (var message in game.ChatMessages)
+            {
+                if (message.IsMessageForChat)
+                {
+                    messages.Add(new ClientMessage(GetClientMethodName(message.TypeId), connectionIds, message));
+                }
+            }
+
+            return messages;
         }
 
         private static string GetClientMethodName(MessageToClientTypeEnum typeId)
@@ -668,8 +765,25 @@ namespace CatsAndMouseGame.Hubs
             };
         }
 
+        private static List<PlayerModel> ClonePlayers(List<PlayerModel> players)
+        {
+            var clonedPlayers = new List<PlayerModel>(players.Count);
+            foreach (var player in players)
+            {
+                clonedPlayers.Add(ClonePlayer(player));
+            }
+
+            return clonedPlayers;
+        }
+
         private static PlayerModel ClonePlayer(PlayerModel player)
         {
+            var figures = new List<FigureModel>(player.Figures.Count);
+            foreach (var figure in player.Figures)
+            {
+                figures.Add(CloneFigure(figure));
+            }
+
             return new PlayerModel
             {
                 UserId = player.UserId,
@@ -679,12 +793,22 @@ namespace CatsAndMouseGame.Hubs
                 IsWinner = player.IsWinner,
                 HasUserLeftTheGame = player.HasUserLeftTheGame,
                 WantsToRematch = player.WantsToRematch,
-                Figures = player.Figures.Select(CloneFigure).ToList()
+                Figures = figures
             };
         }
 
         private static FigureModel CloneFigure(FigureModel figure)
         {
+            var canMoveToPositions = new List<FigurePositionModel>(figure.CanMoveToPositions.Count);
+            foreach (var position in figure.CanMoveToPositions)
+            {
+                canMoveToPositions.Add(new FigurePositionModel
+                {
+                    RowIndex = position.RowIndex,
+                    ColumnIndex = position.ColumnIndex
+                });
+            }
+
             return new FigureModel
             {
                 Id = figure.Id,
@@ -694,19 +818,19 @@ namespace CatsAndMouseGame.Hubs
                     RowIndex = figure.Position.RowIndex,
                     ColumnIndex = figure.Position.ColumnIndex
                 },
-                CanMoveToPositions = figure.CanMoveToPositions
-                    .Select(position => new FigurePositionModel
-                    {
-                        RowIndex = position.RowIndex,
-                        ColumnIndex = position.ColumnIndex
-                    })
-                    .ToList()
+                CanMoveToPositions = canMoveToPositions
             };
         }
 
         private static List<string> GetAllConnectionsByUsersIds(List<string> usersIds)
         {
-            return usersIds.SelectMany(userId => _connections.GetConnectionsByKey(userId)).ToList();
+            var connectionIds = new List<string>();
+            foreach (var userId in usersIds)
+            {
+                connectionIds.AddRange(_connections.GetConnectionsByKey(userId));
+            }
+
+            return connectionIds;
         }
 
         private string GetRequiredUserIdByCurrentConnectionId()

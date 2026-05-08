@@ -1,4 +1,4 @@
-﻿namespace CatsAndMouseGame.Models
+﻿namespace CatsAndMouseApi.Models
 {
     public class MouseModel : FigureModel
     {

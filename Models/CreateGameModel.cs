@@ -1,6 +1,6 @@
-﻿using CatsAndMouseGame.Enums;
+﻿using CatsAndMouseApi.Enums;
 
-namespace CatsAndMouseGame.Models
+namespace CatsAndMouseApi.Models
 {
     public class CreateGameModel
     {
