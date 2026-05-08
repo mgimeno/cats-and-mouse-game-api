@@ -1,4 +1,4 @@
-# Cats and Mouse online multiplayer game
+# Cats and Mouse online multiplayer game (API)
 
 ## Demo URL
 
@@ -18,8 +18,12 @@ All pieces move diagonally on the black squares, but cats cannot move backwards,
 
 The mouse is to reach the last row of the board, whereas the cats are to corner the mouse so that it's not able to make any movement.
 
+## Languages
+
+Available in English, Spanish, French, Portuguese, German & Italian.
+
 ## Development
 
-The website (client) is built using Angular 14, SignalR, responsive design (mobile first) and it's available in English & Spanish.
+Built with Angular 21 & SignalR. Responsive design for mobile/tablet/desktop.
 
-The server is built using .NET Web API Core 9.0 and SignalR.
+API built using .NET 10.0 and SignalR.

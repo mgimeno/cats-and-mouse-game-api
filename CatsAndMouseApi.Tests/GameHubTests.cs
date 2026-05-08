@@ -243,8 +243,8 @@ public sealed class GameHubTests : IDisposable
         await catsHub.PlayerWantsToRematch(new GameIdModel { GameId = game.GameId });
         await mouseHub.PlayerWantsToRematch(new GameIdModel { GameId = game.GameId });
 
-        var catsUserStatus = _clients.LastPayload<GameStatusMessage>("GameStatus", "cats-connection").GameStatus;
-        var mouseUserStatus = _clients.LastPayload<GameStatusMessage>("GameStatus", "mouse-connection").GameStatus;
+        var catsUserStatus = _clients.SinglePayload<GameStatusMessage>("GameStatus", "cats-connection").GameStatus;
+        var mouseUserStatus = _clients.SinglePayload<GameStatusMessage>("GameStatus", "mouse-connection").GameStatus;
         var catsUserPlayer = catsUserStatus.Players[catsUserStatus.MyPlayerIndex];
         var mouseUserPlayer = mouseUserStatus.Players[mouseUserStatus.MyPlayerIndex];
 
