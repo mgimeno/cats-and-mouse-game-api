@@ -29,6 +29,36 @@ public sealed class GameHubTests : IDisposable
     }
 
     [Fact]
+    public async Task Ping_does_not_require_a_registered_connection()
+    {
+        var hub = CreateHub("connection-1");
+
+        await hub.Ping();
+
+        Assert.Empty(_clients.Messages);
+    }
+
+    [Fact]
+    public async Task Ping_sends_nothing_while_a_game_is_in_progress()
+    {
+        var catsHub = CreateHub("cats-connection");
+        var mouseHub = CreateHub("mouse-connection");
+        await catsHub.RegisterConnection("cats-user");
+        var game = await catsHub.CreateGame(new CreateGameModel { UserName = "Cats", TeamId = TeamEnum.Cats });
+        await mouseHub.RegisterConnection("mouse-user");
+        await mouseHub.JoinGame(new JoinGameModel { GameId = game.GameId, UserName = "Mouse" });
+        await catsHub.SendChatMessage(new ChatLineSentByClientModel { GameId = game.GameId, Message = "hello" });
+        _clients.Clear();
+
+        await catsHub.Ping();
+
+        // Clients probe with this on every return to the foreground. Replaying the game
+        // state and chat history here would duplicate every chat line in their UI, and
+        // announcing a reconnection would spam the opponent on each tab switch.
+        Assert.Empty(_clients.Messages);
+    }
+
+    [Fact]
     public async Task RegisterConnection_without_game_sends_empty_list_and_no_in_progress_game()
     {
         var hub = CreateHub("connection-1");

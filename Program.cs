@@ -68,11 +68,18 @@ if (builder.Environment.IsDevelopment())
 
 builder.Services.AddSignalR(options =>
 {
-    options.ClientTimeoutInterval = TimeSpan.FromSeconds(60);
+    // Browsers throttle timers in a backgrounded tab to roughly one tick per minute,
+    // which stretches the client's 15s keep-alive ping out to about 60s. At a 60s
+    // timeout that lands exactly on the boundary and drops players who merely switched
+    // tabs, so allow room for two throttled pings before declaring a client gone.
+    options.ClientTimeoutInterval = TimeSpan.FromSeconds(120);
     options.HandshakeTimeout = TimeSpan.FromSeconds(15);
     options.KeepAliveInterval = TimeSpan.FromSeconds(15);
     options.MaximumReceiveMessageSize = 16 * 1024;
     options.EnableDetailedErrors = builder.Environment.IsDevelopment();
+    // Enough to cover a game's worth of moves and chat across a brief drop. Paired with
+    // AllowStatefulReconnects on the hub mapping below.
+    options.StatefulReconnectBufferSize = 1000;
 })
     .AddJsonProtocol(o =>
     {
@@ -104,7 +111,13 @@ app.UseRouting();
 
 app.UseCors("CorsPolicy");
 
-app.MapHub<GameHub>("/gameHub");
+// Stateful reconnect buffers messages while the transport is briefly down and replays
+// them once it is back, so a move or chat line sent while the opponent's tab was
+// backgrounded is not silently lost. Requires the WebSockets transport.
+app.MapHub<GameHub>("/gameHub", options =>
+{
+    options.AllowStatefulReconnects = true;
+});
 app.MapControllers();
 
 app.Run();

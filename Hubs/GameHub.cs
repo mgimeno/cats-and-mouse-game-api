@@ -21,6 +21,17 @@ namespace CatsAndMouseApi.Hubs
         private static readonly Lock _gamesLock = new();
         private static readonly ConnectionMapping<string> _connections = new();
 
+        /// <summary>
+        /// Liveness probe for clients returning from the background. A page that was
+        /// frozen can come back holding a socket the OS already tore down, which still
+        /// reports itself as connected; only a completed round trip proves otherwise.
+        /// </summary>
+        /// <remarks>
+        /// Must stay free of side effects and must not push any message. Callers invoke
+        /// it on every return to the foreground, so anything done here runs constantly.
+        /// </remarks>
+        public Task Ping() => Task.CompletedTask;
+
         public Task RegisterConnection(string userId)
         {
             userId = NormalizeRequired(userId, "User id is required");
