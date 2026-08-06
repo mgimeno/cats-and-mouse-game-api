@@ -77,9 +77,6 @@ builder.Services.AddSignalR(options =>
     options.KeepAliveInterval = TimeSpan.FromSeconds(15);
     options.MaximumReceiveMessageSize = 16 * 1024;
     options.EnableDetailedErrors = builder.Environment.IsDevelopment();
-    // Enough to cover a game's worth of moves and chat across a brief drop. Paired with
-    // AllowStatefulReconnects on the hub mapping below.
-    options.StatefulReconnectBufferSize = 1000;
 })
     .AddJsonProtocol(o =>
     {
@@ -111,13 +108,13 @@ app.UseRouting();
 
 app.UseCors("CorsPolicy");
 
-// Stateful reconnect buffers messages while the transport is briefly down and replays
-// them once it is back, so a move or chat line sent while the opponent's tab was
-// backgrounded is not silently lost. Requires the WebSockets transport.
-app.MapHub<GameHub>("/gameHub", options =>
-{
-    options.AllowStatefulReconnects = true;
-});
+// Deliberately no AllowStatefulReconnects. It replays buffered messages across a brief
+// drop, but when its in-place transport resume fails -- which it does behind a proxy
+// that will not carry the resumed connection id -- it stops the connection outright
+// instead of falling through to the client's automatic reconnect. The client refetches
+// authoritative state after every reconnect anyway, so the replay bought nothing that
+// was not already covered, at the cost of turning a silent recovery into a dead socket.
+app.MapHub<GameHub>("/gameHub");
 app.MapControllers();
 
 app.Run();
