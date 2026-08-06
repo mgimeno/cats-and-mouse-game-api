@@ -35,12 +35,17 @@ namespace CatsAndMouseApi.Hubs
         public Task RegisterConnection(string userId)
         {
             userId = NormalizeRequired(userId, "User id is required");
-            var connectionCount = _connections.Add(userId, Context.ConnectionId);
 
             var outgoingMessages = new List<ClientMessage>();
 
             lock (_gamesLock)
             {
+                // Registering has to happen under the same lock that guards the chat
+                // history read below. Outside it, a message sent in between would be
+                // broadcast to this brand new connection *and* appear in the replay it
+                // is about to receive, showing up twice in the caller's chat.
+                var connectionCount = _connections.Add(userId, Context.ConnectionId);
+
                 PruneExpiredGames();
                 var playerInProgressGame = GetInProgressGameForUser(userId);
                 if (playerInProgressGame != null)
