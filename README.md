@@ -26,4 +26,18 @@ Available in English, Spanish, French, Portuguese, German & Italian.
 
 Built with Angular 22 & SignalR. Responsive design for mobile/tablet/desktop.
 
-API built using .NET 10.0 and SignalR.
+API built using .NET 11.0 and SignalR, published as a Native AOT executable: no .NET runtime on the
+server, startup in tens of milliseconds and a fraction of the memory of the JIT build.
+
+Requires the .NET 11 SDK (pinned in `global.json`).
+
+```bash
+dotnet run                                     # http://localhost:53000, for the UI's dev server
+dotnet test --solution CatsAndMouseApi.sln     # Microsoft.Testing.Platform runner (see global.json)
+dotnet publish -r linux-arm64                  # Native AOT; build on Linux, as CI does
+scripts/smoke-test.sh http://localhost:53000   # plays a full game against a running API
+```
+
+CI publishes the executable on an Azure Linux 3.0 image (glibc 2.38, older than the server's), plays a
+game against it with `scripts/smoke-test.sh`, and deploys it to the Raspberry Pi. Each build compiles in
+the latest .NET 11 patch, so redeploying is how runtime security fixes reach the server.

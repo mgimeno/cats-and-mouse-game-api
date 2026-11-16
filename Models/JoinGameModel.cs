@@ -1,10 +1,8 @@
-﻿
-namespace CatsAndMouseApi.Models
+namespace CatsAndMouseApi.Models;
+
+public sealed class JoinGameModel
 {
-    public class JoinGameModel
-    {
-        public string GameId { get; set; } = string.Empty;
-        public string UserName { get; set; } = string.Empty;
-        public string? GamePassword { get; set; }
-    }
+    public string GameId { get; init; } = string.Empty;
+    public string UserName { get; init; } = string.Empty;
+    public string? GamePassword { get; init; }
 }

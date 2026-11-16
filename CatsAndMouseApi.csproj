@@ -1,9 +1,40 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <!-- Published as a Native AOT executable for the Raspberry Pi 5 (linux-arm64). Compared with
+       the framework-dependent build it replaces, there is no JIT warm-up on the first moves after
+       a deploy, startup drops from about a second to tens of milliseconds (the API is down for
+       exactly that long on every deploy, and it holds every game in memory), and the resident
+       set shrinks to a fraction on a box shared with PostgreSQL and Node. The server needs no
+       .NET runtime: each CI build bakes in the latest patch of its SDK image, so a redeploy is
+       also how a runtime security fix reaches the box. `dotnet run` and the tests stay on the
+       JIT; `PublishAot` also turns on the trim and AOT analyzers for every build. -->
+  <PropertyGroup>
+    <PublishAot>true</PublishAot>
+    <!-- Restores the linux-arm64 runtime and ILCompiler packs with everything else, so CI can
+         publish with `no-restore` and its NuGet cache holds them too. -->
+    <RuntimeIdentifiers>linux-arm64</RuntimeIdentifiers>
+    <OptimizationPreference>Speed</OptimizationPreference>
+    <!-- Nothing here formats or compares text by culture, so ICU (about 30 MB of mapped data
+         and its load time at startup) is not needed. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Native symbols stay in the build folder for debugging; the deploy ships the executable. -->
+    <CopyOutputSymbolsToPublishDirectory>false</CopyOutputSymbolsToPublishDirectory>
+    <!-- No wwwroot and no IIS: neither the static web assets manifest nor web.config belongs in
+         the release. -->
+    <StaticWebAssetsEnabled>false</StaticWebAssetsEnabled>
+    <IsTransformWebConfigDisabled>true</IsTransformWebConfigDisabled>
+  </PropertyGroup>
+
+  <!-- Runtime async: the runtime, not a compiler-generated state machine, implements async
+       methods. Supported for net11.0 and by Native AOT. -->
+  <PropertyGroup>
+    <Features>$(Features);runtime-async=on</Features>
   </PropertyGroup>
 
   <!-- Restore fails, locally and in CI, on a high (NU1903) or critical (NU1904) advisory in any
@@ -16,14 +47,29 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.15" />
-  </ItemGroup>
-
-  <ItemGroup>
     <Compile Remove="CatsAndMouseApi.Tests/**/*.cs" />
     <Content Remove="CatsAndMouseApi.Tests/**/*" />
     <EmbeddedResource Remove="CatsAndMouseApi.Tests/**/*" />
     <None Remove="CatsAndMouseApi.Tests/**/*" />
   </ItemGroup>
+
+  <!-- The Web SDK publishes every JSON file as content. global.json pins the build's SDK and has
+       no business on the server, and the Development settings never run there. -->
+  <ItemGroup>
+    <Content Remove="global.json" />
+    <None Include="global.json" />
+    <Content Update="appsettings.Development.json" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
+  <!-- The runtime is compiled into the executable, so nothing on the server can report its
+       version. This writes it next to the executable in the same "<framework> <version>" form as
+       the dotnet list-runtimes command prints, which is what raspberry/check-for-package-updates.sh
+       reads to flag a release that needs a redeploy for a runtime patch. -->
+  <Target Name="WriteDotNetRuntimeVersions" AfterTargets="Publish" Condition="'$(PublishAot)' == 'true' and '$(RuntimeIdentifier)' != ''">
+    <ItemGroup>
+      <_DotNetRuntimeVersionLine Include="@(ResolvedRuntimePack->'%(FrameworkName) %(NuGetPackageVersion)')" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(PublishDir)dotnet-runtimes.txt" Lines="@(_DotNetRuntimeVersionLine)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+  </Target>
 
 </Project>

@@ -1,10 +1,27 @@
 using System.IO.Compression;
-using System.Net;
 using CatsAndMouseApi.Hubs;
+using CatsAndMouseApi.Serialization;
+using CatsAndMouseApi.Services;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.ResponseCompression;
+using Microsoft.AspNetCore.SignalR;
 
-var builder = WebApplication.CreateBuilder(args);
+const string CorsPolicyName = "CorsPolicy";
+
+// The slim builder leaves out HTTPS, HTTP/3, IIS integration, the EventLog and EventSource
+// loggers and regex route constraints. Nothing here uses them behind nginx; it starts faster,
+// and it is the builder Native AOT is designed around.
+var builder = WebApplication.CreateSlimBuilder(args);
+
+// Under systemd, stdout goes to the journal, and systemd says so through JOURNAL_STREAM. The
+// systemd formatter writes each entry as one line with a syslog priority prefix, so journald
+// records the real level (`journalctl -p warning` works) and a multi-line entry stays one
+// record. The slim builder only registers the simple formatter, so this is the only way to get it.
+if (Environment.GetEnvironmentVariable("JOURNAL_STREAM") is not null)
+{
+    builder.Logging.AddSystemdConsole();
+}
+
 var allowedOrigins = builder.Configuration
     .GetSection("AllowedOrigins")
     .Get<string[]>()?
@@ -23,7 +40,10 @@ if (allowedOrigins.Contains("*", StringComparer.Ordinal))
     throw new InvalidOperationException("AllowedOrigins cannot contain '*' because SignalR uses credentialed requests");
 }
 
-builder.Services.AddOpenApi();
+// The listening address is the "Urls" setting in appsettings. It outranks ASPNETCORE_URLS, which
+// is host configuration; to run a second copy beside the live one, pass `--urls` instead, which
+// outranks everything. nginx sets its own Server header, so Kestrel's is dropped.
+builder.WebHost.ConfigureKestrel(options => options.AddServerHeader = false);
 
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
@@ -38,7 +58,7 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("CorsPolicy", policy =>
+    options.AddPolicy(CorsPolicyName, policy =>
     {
         policy
             .WithOrigins(allowedOrigins)
@@ -48,7 +68,8 @@ builder.Services.AddCors(options =>
     });
 });
 
-builder.Services.AddControllers();
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<GameService>();
 
 if (builder.Environment.IsDevelopment())
 {
@@ -77,24 +98,15 @@ builder.Services.AddSignalR(options =>
     options.KeepAliveInterval = TimeSpan.FromSeconds(15);
     options.MaximumReceiveMessageSize = 16 * 1024;
     options.EnableDetailedErrors = builder.Environment.IsDevelopment();
+    options.AddFilter(new HubExceptionUnwrappingFilter());
 })
-    .AddJsonProtocol(o =>
+    .AddJsonProtocol(options =>
     {
-        o.PayloadSerializerOptions.WriteIndented = false;
+        // Source-generated metadata only: no reflection, which Native AOT does not have anyway.
+        options.PayloadSerializerOptions.TypeInfoResolverChain.Insert(0, GameJsonSerializerContext.Default);
     });
 
-// Kestrel: HTTP only
-builder.WebHost.ConfigureKestrel(options =>
-{
-    options.Listen(IPAddress.Loopback, 53000);
-});
-
 var app = builder.Build();
-
-if (app.Environment.IsDevelopment())
-{
-    app.MapOpenApi();
-}
 
 // MUST be first
 app.UseForwardedHeaders();
@@ -106,7 +118,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseRouting();
 
-app.UseCors("CorsPolicy");
+app.UseCors(CorsPolicyName);
 
 // Deliberately no AllowStatefulReconnects. It replays buffered messages across a brief
 // drop, but when its in-place transport resume fails -- which it does behind a proxy
@@ -115,6 +127,27 @@ app.UseCors("CorsPolicy");
 // authoritative state after every reconnect anyway, so the replay bought nothing that
 // was not already covered, at the cost of turning a silent recovery into a dead socket.
 app.MapHub<GameHub>("/gameHub");
-app.MapControllers();
+
+// Built once: nothing in it changes while the process runs. Short-circuited, so a health check
+// skips everything after routing (CORS included: no browser reads it).
+var statusText = BuildStatusText(app.Environment, allowedOrigins);
+app.MapGet("/status", [ShortCircuit] () => statusText);
 
 app.Run();
+
+static string BuildStatusText(IHostEnvironment environment, string[] allowedOrigins)
+{
+    var isDebugMode = false;
+#if DEBUG
+    isDebugMode = true;
+#endif
+
+    return $"""
+
+        Cats & Mouse API is ready
+
+        Build Mode: {(isDebugMode ? "DEBUG (Development)" : "RELEASE (Production)")}
+        Environment: {environment.EnvironmentName.ToUpperInvariant()}
+        Allowed origins: {string.Join(", ", allowedOrigins)}
+        """;
+}

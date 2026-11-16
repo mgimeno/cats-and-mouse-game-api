@@ -1,903 +1,115 @@
-﻿using CatsAndMouseApi.Enums;
-using CatsAndMouseApi.Interfaces;
-using CatsAndMouseApi.Models;
+﻿using CatsAndMouseApi.Models;
 using CatsAndMouseApi.Models.MessagesToClient;
-using Microsoft.AspNetCore.Cors;
+using CatsAndMouseApi.Services;
 using Microsoft.AspNetCore.SignalR;
 
-namespace CatsAndMouseApi.Hubs
+namespace CatsAndMouseApi.Hubs;
+
+/// <summary>
+/// The SignalR surface the UI calls. Method names and parameter shapes are the client contract.
+/// All state and rules live in <see cref="GameService"/>; each method hands the caller's
+/// connection to it and delivers the messages it returns.
+/// </summary>
+public sealed class GameHub(GameService games) : Hub
 {
-    [EnableCors("CorsPolicy")]
-    public class GameHub : Hub
+    /// <summary>
+    /// Liveness probe for clients returning from the background. A page that was
+    /// frozen can come back holding a socket the OS already tore down, which still
+    /// reports itself as connected; only a completed round trip proves otherwise.
+    /// </summary>
+    /// <remarks>
+    /// Must stay free of side effects and must not push any message. Callers invoke
+    /// it on every return to the foreground, so anything done here runs constantly.
+    /// </remarks>
+    public Task Ping() => Task.CompletedTask;
+
+    public Task RegisterConnection(string userId)
     {
-        private const int MaxChatMessagesPerGame = 250;
-        private const int MaxChatMessageLength = 1000;
-        private const int MaxStoredGames = 500;
-        private static readonly TimeSpan WaitingGameLifetime = TimeSpan.FromMinutes(30);
-        private static readonly TimeSpan FinishedGameLifetime = TimeSpan.FromHours(2);
-        private static readonly TimeSpan InactiveGameLifetime = TimeSpan.FromHours(12);
+        return SendAsync(games.RegisterConnection(Context.ConnectionId, userId));
+    }
 
-        private static readonly List<GameModel> _games = [];
-        private static readonly Lock _gamesLock = new();
-        private static readonly ConnectionMapping<string> _connections = new();
+    public override async Task OnDisconnectedAsync(Exception? exception)
+    {
+        await SendAsync(games.Disconnect(Context.ConnectionId));
+        await base.OnDisconnectedAsync(exception);
+    }
 
-        /// <summary>
-        /// Liveness probe for clients returning from the background. A page that was
-        /// frozen can come back holding a socket the OS already tore down, which still
-        /// reports itself as connected; only a completed round trip proves otherwise.
-        /// </summary>
-        /// <remarks>
-        /// Must stay free of side effects and must not push any message. Callers invoke
-        /// it on every return to the foreground, so anything done here runs constantly.
-        /// </remarks>
-        public Task Ping() => Task.CompletedTask;
+    public async Task<GameListItem> CreateGame(CreateGameModel model)
+    {
+        var (game, messages) = games.CreateGame(Context.ConnectionId, model);
+        await SendAsync(messages);
+        return game;
+    }
 
-        public Task RegisterConnection(string userId)
+    public Task JoinGame(JoinGameModel model)
+    {
+        return SendAsync(games.JoinGame(Context.ConnectionId, model));
+    }
+
+    public Task Move(MoveFigureModel model)
+    {
+        return SendAsync(games.Move(Context.ConnectionId, model));
+    }
+
+    public Task CancelGameThatHasNotStarted(CancelGameModel model)
+    {
+        return SendAsync(games.CancelGameThatHasNotStarted(Context.ConnectionId, model));
+    }
+
+    public Task SendInProgressGameStatusToCaller()
+    {
+        return SendAsync(games.GetInProgressGameStatus(Context.ConnectionId));
+    }
+
+    public Task SendWhetherHasInProgressGameToCaller()
+    {
+        return SendAsync(games.GetHasInProgressGame(Context.ConnectionId));
+    }
+
+    public Task SendChatMessage(ChatLineSentByClientModel model)
+    {
+        return SendAsync(games.SendChatMessage(Context.ConnectionId, model));
+    }
+
+    public Task ExitGame(GameIdModel model)
+    {
+        return SendAsync(games.ExitGame(Context.ConnectionId, model));
+    }
+
+    public Task Surrender()
+    {
+        return SendAsync(games.Surrender(Context.ConnectionId));
+    }
+
+    public Task PlayerWantsToRematch(GameIdModel model)
+    {
+        return SendAsync(games.PlayerWantsToRematch(Context.ConnectionId, model));
+    }
+
+    // The client calls it by this exact name, "Async" included.
+    public Task SendGamesAwaitingForSecondPlayerToCallerAsync()
+    {
+        return SendAsync(games.GetGameList(Context.ConnectionId));
+    }
+
+    /// <summary>
+    /// One at a time and in order: a client has to see GameStart before the GameStatus that
+    /// follows it, and chat lines in the order they were said. Each send normally completes
+    /// synchronously, straight into the connection's output pipe.
+    /// </summary>
+    private async Task SendAsync(IReadOnlyList<ClientMessage> messages)
+    {
+        for (var i = 0; i < messages.Count; i++)
         {
-            userId = NormalizeRequired(userId, "User id is required");
-
-            var outgoingMessages = new List<ClientMessage>();
-
-            lock (_gamesLock)
+            var message = messages[i];
+            if (message.Audience == ClientMessageAudience.AllExcept)
             {
-                // Registering has to happen under the same lock that guards the chat
-                // history read below. Outside it, a message sent in between would be
-                // broadcast to this brand new connection *and* appear in the replay it
-                // is about to receive, showing up twice in the caller's chat.
-                var connectionCount = _connections.Add(userId, Context.ConnectionId);
-
-                PruneExpiredGames();
-                var playerInProgressGame = GetInProgressGameForUser(userId);
-                if (playerInProgressGame != null)
-                {
-                    var player = GetRequiredPlayer(playerInProgressGame, userId);
-                    outgoingMessages.Add(BuildGameStatusMessage(playerInProgressGame, player, _connections.GetConnectionsByKey(userId)));
-                    outgoingMessages.AddRange(BuildChatHistoryMessages(playerInProgressGame, Context.ConnectionId));
-
-                    if (connectionCount == 1)
-                    {
-                        var connectionStatusMessage = BuildPlayerConnectionStatusChangedMessage(playerInProgressGame, userId, isConnected: true);
-                        if (connectionStatusMessage != null)
-                        {
-                            outgoingMessages.Add(connectionStatusMessage);
-                        }
-                    }
-                }
-                else
-                {
-                    outgoingMessages.Add(BuildGameListMessage(_connections.GetConnectionsByKey(userId)));
-                }
-
-                outgoingMessages.Add(BuildHasInProgressGameMessage(userId, playerInProgressGame != null));
+                await Clients.AllExcept(message.ConnectionIds).SendAsync(message.MethodName, message.Message);
             }
-
-            return SendMessagesAsync(outgoingMessages);
-        }
-
-        public override async Task OnDisconnectedAsync(Exception? exception)
-        {
-            var result = _connections.RemoveConnection(Context.ConnectionId);
-            if (result == null)
+            else if (message.ConnectionIds.Count > 0)
             {
-                await base.OnDisconnectedAsync(exception);
-                return;
-            }
-
-            if (!result.HasOtherActiveConnections)
-            {
-                var outgoingMessages = new List<ClientMessage>();
-
-                lock (_gamesLock)
-                {
-                    PruneExpiredGames();
-                    var playerInProgressGame = GetInProgressGameForUser(result.Key);
-                    if (CancelWaitingGamesCreatedByUser(result.Key))
-                    {
-                        outgoingMessages.Add(BuildGameListMessage(_connections.GetAllConnections()));
-                    }
-
-                    if (playerInProgressGame != null)
-                    {
-                        var connectionStatusMessage = BuildPlayerConnectionStatusChangedMessage(playerInProgressGame, result.Key, isConnected: false);
-                        if (connectionStatusMessage != null)
-                        {
-                            outgoingMessages.Add(connectionStatusMessage);
-                        }
-                    }
-                }
-
-                await SendMessagesAsync(outgoingMessages);
-            }
-
-            await base.OnDisconnectedAsync(exception);
-        }
-
-        public async Task<GameListItem> CreateGame(CreateGameModel model)
-        {
-            ArgumentNullException.ThrowIfNull(model);
-            var userId = GetRequiredUserIdByCurrentConnectionId();
-            var userName = NormalizeRequired(model.UserName, "User name is required");
-            ValidateTeam(model.TeamId);
-
-            GameListItem createdGame;
-            ClientMessage gameListMessage;
-
-            lock (_gamesLock)
-            {
-                PruneExpiredGames();
-                if (HasWaitingGameForUser(userId))
-                {
-                    throw new HubException("You are already creating another game");
-                }
-
-                var newGame = CreateGameWithUniqueId(model.GamePassword);
-                newGame.SetFirstPlayer(model.TeamId, userName, userId);
-                _games.Add(newGame);
-
-                createdGame = BuildGameListItem(newGame);
-                gameListMessage = BuildGameListMessage(_connections.GetAllConnections());
-            }
-
-            await SendMessageAsync(gameListMessage);
-            return createdGame;
-        }
-
-        public Task JoinGame(JoinGameModel model)
-        {
-            ArgumentNullException.ThrowIfNull(model);
-            var userId = GetRequiredUserIdByCurrentConnectionId();
-            var userName = NormalizeRequired(model.UserName, "User name is required");
-            var gameId = NormalizeRequired(model.GameId, "Game id is required");
-
-            var outgoingMessages = new List<ClientMessage>();
-
-            lock (_gamesLock)
-            {
-                PruneExpiredGames();
-                var game = GetGameById(gameId) ?? throw new HubException("Game does not exist");
-                if (game.IsPasswordProtected() && !string.Equals(game.Password, model.GamePassword, StringComparison.Ordinal))
-                {
-                    throw new HubException("Game password is invalid");
-                }
-
-                if (!game.IsWaitingForSecondPlayer())
-                {
-                    throw new HubException("Game is in progress or over");
-                }
-
-                if (game.Players[0].UserId == userId)
-                {
-                    throw new HubException("You cannot join your own game");
-                }
-
-                game.SetSecondPlayer(userName, userId);
-                game.Start();
-
-                outgoingMessages.Add(new ClientMessage("GameStart", GetAllConnectionsByUsersIds(game.GetPlayersUsersIds()), new GameStartMessage()));
-                outgoingMessages.AddRange(BuildGameStatusMessagesForAllPlayers(game));
-                outgoingMessages.Add(BuildGameListMessage(_connections.GetAllConnections()));
-            }
-
-            return SendMessagesAsync(outgoingMessages);
-        }
-
-        public Task Move(MoveFigureModel model)
-        {
-            ArgumentNullException.ThrowIfNull(model);
-            var userId = GetRequiredUserIdByCurrentConnectionId();
-            var outgoingMessages = new List<ClientMessage>();
-
-            lock (_gamesLock)
-            {
-                PruneExpiredGames();
-                var game = GetRequiredInProgressGame(userId);
-
-                if (game.IsGameOver())
-                {
-                    throw new HubException("Game is over");
-                }
-
-                var player = GetRequiredPlayer(game, userId);
-                if (!player.IsTheirTurn)
-                {
-                    throw new HubException("It's not your turn");
-                }
-
-                var figure = game.GetPlayerFigure(player, model.FigureId) ?? throw new HubException("Figure does not exist");
-                if (!game.CanMove(figure, model.RowIndex, model.ColumnIndex))
-                {
-                    throw new HubException("This figure cannot be moved to that position");
-                }
-
-                game.Move(figure, model.RowIndex, model.ColumnIndex);
-                if (!game.IsGameOver())
-                {
-                    game.SetNextTurn();
-                }
-
-                outgoingMessages.AddRange(BuildGameStatusMessagesForAllPlayers(game));
-            }
-
-            return SendMessagesAsync(outgoingMessages);
-        }
-
-        public async Task CancelGameThatHasNotStarted(CancelGameModel model)
-        {
-            ArgumentNullException.ThrowIfNull(model);
-            var currentUserId = GetRequiredUserIdByCurrentConnectionId();
-            var modelUserId = NormalizeRequired(model.UserId, "User id is required");
-
-            if (!string.Equals(currentUserId, modelUserId, StringComparison.Ordinal))
-            {
-                throw new HubException("You cannot cancel another player's game");
-            }
-
-            ClientMessage? gameListMessage = null;
-
-            lock (_gamesLock)
-            {
-                PruneExpiredGames();
-                var removed = CancelWaitingGame(model.GameId, currentUserId);
-                if (removed && model.SendAwaitingGamesToAllClients)
-                {
-                    gameListMessage = BuildGameListMessage(_connections.GetAllConnections());
-                }
-            }
-
-            if (gameListMessage != null)
-            {
-                await SendMessageAsync(gameListMessage);
+                await Clients.Clients(message.ConnectionIds).SendAsync(message.MethodName, message.Message);
             }
         }
-
-        public Task SendInProgressGameStatusToCaller()
-        {
-            var userId = GetRequiredUserIdByCurrentConnectionId();
-            ClientMessage outgoingMessage;
-
-            lock (_gamesLock)
-            {
-                PruneExpiredGames();
-                var game = GetInProgressGameForUser(userId);
-                if (game == null)
-                {
-                    outgoingMessage = BuildHasInProgressGameMessage(userId, hasInProgressGame: false);
-                }
-                else
-                {
-                    var player = GetRequiredPlayer(game, userId);
-                    outgoingMessage = BuildGameStatusMessage(game, player, _connections.GetConnectionsByKey(userId));
-                }
-            }
-
-            return SendMessageAsync(outgoingMessage);
-        }
-
-        public Task SendWhetherHasInProgressGameToCaller()
-        {
-            var userId = GetRequiredUserIdByCurrentConnectionId();
-            ClientMessage outgoingMessage;
-
-            lock (_gamesLock)
-            {
-                PruneExpiredGames();
-                outgoingMessage = BuildHasInProgressGameMessage(userId, GetInProgressGameForUser(userId) != null);
-            }
-
-            return SendMessageAsync(outgoingMessage);
-        }
-
-        public Task SendChatMessage(ChatLineSentByClientModel model)
-        {
-            ArgumentNullException.ThrowIfNull(model);
-            var userId = GetRequiredUserIdByCurrentConnectionId();
-            var messageText = NormalizeRequired(model.Message, "Message is required");
-            if (messageText.Length > MaxChatMessageLength)
-            {
-                messageText = messageText[..MaxChatMessageLength];
-            }
-
-            ClientMessage outgoingMessage;
-
-            lock (_gamesLock)
-            {
-                PruneExpiredGames();
-                var game = GetRequiredGameForUser(model.GameId, userId);
-                var player = GetRequiredPlayer(game, userId);
-
-                var message = new ChatMessage
-                {
-                    GameId = game.Id,
-                    ChatLine = new ChatLineModel
-                    {
-                        UserName = player.Name,
-                        TeamId = player.TeamId,
-                        Message = messageText
-                    }
-                };
-
-                AddChatMessage(game, message);
-                outgoingMessage = new ClientMessage("ChatMessage", GetAllConnectionsByUsersIds(game.GetPlayersUsersIds()), message);
-            }
-
-            return SendMessageAsync(outgoingMessage);
-        }
-
-        public Task ExitGame(GameIdModel model)
-        {
-            ArgumentNullException.ThrowIfNull(model);
-            var userId = GetRequiredUserIdByCurrentConnectionId();
-            var outgoingMessages = new List<ClientMessage>();
-
-            lock (_gamesLock)
-            {
-                PruneExpiredGames();
-                var game = GetRequiredGameForUser(model.GameId, userId);
-                var playerWhoLeft = GetRequiredPlayer(game, userId);
-                var opponentPlayer = game.GetOpponentPlayer(playerWhoLeft) ?? throw new HubException("Opponent does not exist");
-                var message = new PlayerHasLeftGameMessage
-                {
-                    GameId = game.Id,
-                    UserName = playerWhoLeft.Name,
-                    TeamId = playerWhoLeft.TeamId
-                };
-
-                AddChatMessage(game, message);
-                outgoingMessages.Add(new ClientMessage("PlayerHasLeftGame", _connections.GetConnectionsByKey(opponentPlayer.UserId), message));
-
-                game.PlayerLeft(playerWhoLeft);
-
-                if (!opponentPlayer.HasUserLeftTheGame)
-                {
-                    outgoingMessages.Add(BuildGameStatusMessage(game, opponentPlayer, _connections.GetConnectionsByKey(opponentPlayer.UserId)));
-                }
-            }
-
-            return SendMessagesAsync(outgoingMessages);
-        }
-
-        public Task Surrender()
-        {
-            var userId = GetRequiredUserIdByCurrentConnectionId();
-            var outgoingMessages = new List<ClientMessage>();
-
-            lock (_gamesLock)
-            {
-                PruneExpiredGames();
-                var game = GetRequiredInProgressGame(userId);
-                var playerWhoSurrenders = GetRequiredPlayer(game, userId);
-
-                var message = new PlayerHasSurrenderedMessage
-                {
-                    GameId = game.Id,
-                    UserName = playerWhoSurrenders.Name,
-                    TeamId = playerWhoSurrenders.TeamId
-                };
-
-                AddChatMessage(game, message);
-                outgoingMessages.Add(new ClientMessage("PlayerHasSurrendered", GetAllConnectionsByUsersIds(game.GetPlayersUsersIds()), message));
-
-                game.PlayerSurrenders(playerWhoSurrenders);
-                outgoingMessages.AddRange(BuildGameStatusMessagesForAllPlayers(game));
-            }
-
-            return SendMessagesAsync(outgoingMessages);
-        }
-
-        public Task PlayerWantsToRematch(GameIdModel model)
-        {
-            ArgumentNullException.ThrowIfNull(model);
-            var userId = GetRequiredUserIdByCurrentConnectionId();
-            var outgoingMessages = new List<ClientMessage>();
-
-            lock (_gamesLock)
-            {
-                PruneExpiredGames();
-                var game = GetRequiredGameForUser(model.GameId, userId);
-                if (!game.IsGameOver())
-                {
-                    throw new HubException("Game is not over");
-                }
-
-                if (game.HasAnyPlayerLeft())
-                {
-                    throw new HubException("Opponent has left");
-                }
-
-                var playerWhoWantsToRematch = GetRequiredPlayer(game, userId);
-                var opponentPlayer = game.GetOpponentPlayer(playerWhoWantsToRematch) ?? throw new HubException("Opponent does not exist");
-                if (!playerWhoWantsToRematch.WantsToRematch)
-                {
-                    playerWhoWantsToRematch.WantsToRematch = true;
-                    game.Touch();
-
-                    var message = new PlayerWantsRematchMessage
-                    {
-                        GameId = game.Id,
-                        UserName = playerWhoWantsToRematch.Name,
-                        TeamId = playerWhoWantsToRematch.TeamId
-                    };
-
-                    AddChatMessage(game, message);
-                    outgoingMessages.Add(new ClientMessage("PlayerWantsRematch", GetAllConnectionsByUsersIds(game.GetPlayersUsersIds()), message));
-                }
-
-                if (game.IsReadyForRematch() && game.RematchGameId == null)
-                {
-                    var rematchGame = CreateGameWithUniqueId();
-                    rematchGame.SetFirstPlayer(GetOppositeTeam(playerWhoWantsToRematch.TeamId), playerWhoWantsToRematch.Name, playerWhoWantsToRematch.UserId);
-                    rematchGame.SetSecondPlayer(opponentPlayer.Name, opponentPlayer.UserId);
-                    rematchGame.Start();
-
-                    _games.Add(rematchGame);
-                    game.RematchGameId = rematchGame.Id;
-
-                    outgoingMessages.AddRange(BuildGameStatusMessagesForAllPlayers(rematchGame));
-                }
-            }
-
-            return SendMessagesAsync(outgoingMessages);
-        }
-
-        public Task SendGamesAwaitingForSecondPlayerToCallerAsync()
-        {
-            var userId = GetRequiredUserIdByCurrentConnectionId();
-            ClientMessage outgoingMessage;
-
-            lock (_gamesLock)
-            {
-                PruneExpiredGames();
-                outgoingMessage = BuildGameListMessage(_connections.GetConnectionsByKey(userId));
-            }
-
-            return SendMessageAsync(outgoingMessage);
-        }
-
-        private static GameModel CreateGameWithUniqueId(string? gamePassword = null)
-        {
-            GameModel game;
-            do
-            {
-                game = new GameModel(gamePassword);
-            }
-            while (GameIdExists(game.Id));
-
-            return game;
-        }
-
-        private static bool GameIdExists(string gameId)
-        {
-            foreach (var game in _games)
-            {
-                if (string.Equals(game.Id, gameId, StringComparison.Ordinal))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private static GameModel? GetGameById(string gameId)
-        {
-            foreach (var game in _games)
-            {
-                if (string.Equals(game.Id, gameId, StringComparison.Ordinal))
-                {
-                    return game;
-                }
-            }
-
-            return null;
-        }
-
-        private static bool HasWaitingGameForUser(string userId)
-        {
-            foreach (var game in _games)
-            {
-                if (game.IsWaitingForSecondPlayer() && game.GetPlayerByUserId(userId) != null)
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private static GameModel? GetInProgressGameForUser(string userId)
-        {
-            foreach (var game in _games)
-            {
-                if (game.IsGameInProgress() && game.GetPlayerByUserId(userId) != null)
-                {
-                    return game;
-                }
-            }
-
-            return null;
-        }
-
-        private static GameModel GetRequiredInProgressGame(string userId)
-        {
-            return GetInProgressGameForUser(userId) ?? throw new HubException("Game does not exist");
-        }
-
-        private static GameModel GetRequiredGameForUser(string gameId, string userId)
-        {
-            gameId = NormalizeRequired(gameId, "Game id is required");
-
-            foreach (var game in _games)
-            {
-                if (string.Equals(game.Id, gameId, StringComparison.Ordinal) &&
-                    game.GetPlayerByUserId(userId) != null)
-                {
-                    return game;
-                }
-            }
-
-            throw new HubException("Game does not exist");
-        }
-
-        private static PlayerModel GetRequiredPlayer(GameModel game, string userId)
-        {
-            return game.GetPlayerByUserId(userId) ?? throw new HubException("Player does not exist");
-        }
-
-        private static bool CancelWaitingGamesCreatedByUser(string userId)
-        {
-            var removed = false;
-            for (var i = _games.Count - 1; i >= 0; i--)
-            {
-                var game = _games[i];
-                if (game.IsWaitingForSecondPlayer() && game.GetPlayerByUserId(userId) != null)
-                {
-                    _games.RemoveAt(i);
-                    removed = true;
-                }
-            }
-
-            return removed;
-        }
-
-        private static bool CancelWaitingGame(string gameId, string userId)
-        {
-            gameId = NormalizeRequired(gameId, "Game id is required");
-
-            for (var i = 0; i < _games.Count; i++)
-            {
-                var game = _games[i];
-                if (string.Equals(game.Id, gameId, StringComparison.Ordinal) &&
-                    game.IsWaitingForSecondPlayer() &&
-                    game.GetPlayerByUserId(userId) != null)
-                {
-                    _games.RemoveAt(i);
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private static void AddChatMessage(GameModel game, IMessageToClient message)
-        {
-            game.ChatMessages.Add(message);
-            game.Touch();
-
-            if (game.ChatMessages.Count > MaxChatMessagesPerGame)
-            {
-                game.ChatMessages.RemoveRange(0, game.ChatMessages.Count - MaxChatMessagesPerGame);
-            }
-        }
-
-        private static void PruneExpiredGames()
-        {
-            var now = DateTime.UtcNow;
-
-            _games.RemoveAll(game =>
-                (game.IsWaitingForSecondPlayer() && now - game.DateCreated > WaitingGameLifetime) ||
-                (game.DateFinished.HasValue && now - game.DateFinished.Value > FinishedGameLifetime) ||
-                (game.IsGameInProgress() && now - game.LastActivityUtc > InactiveGameLifetime));
-
-            var excessGameCount = _games.Count - MaxStoredGames;
-            if (excessGameCount <= 0)
-            {
-                return;
-            }
-
-            var removableGames = new List<GameModel>(_games.Count);
-            foreach (var game in _games)
-            {
-                if (!game.IsGameInProgress())
-                {
-                    removableGames.Add(game);
-                }
-            }
-
-            if (removableGames.Count == 0)
-            {
-                return;
-            }
-
-            removableGames.Sort(static (left, right) => left.LastActivityUtc.CompareTo(right.LastActivityUtc));
-
-            var removeCount = Math.Min(excessGameCount, removableGames.Count);
-            var gamesToRemove = new HashSet<GameModel>();
-            for (var i = 0; i < removeCount; i++)
-            {
-                gamesToRemove.Add(removableGames[i]);
-            }
-
-            _games.RemoveAll(gamesToRemove.Contains);
-        }
-
-        private static ClientMessage BuildHasInProgressGameMessage(string userId, bool hasInProgressGame)
-        {
-            return new ClientMessage(
-                "HasInProgressGame",
-                _connections.GetConnectionsByKey(userId),
-                new PlayerHasInProgressGameMessage { HasInProgressGame = hasInProgressGame });
-        }
-
-        private static ClientMessage BuildGameListMessage(List<string> connectionIds)
-        {
-            return new ClientMessage(
-                "GameList",
-                connectionIds,
-                new GameListMessage { GameList = BuildGamesAwaitingForSecondPlayer() });
-        }
-
-        private static List<GameListItem> BuildGamesAwaitingForSecondPlayer()
-        {
-            var waitingGames = new List<GameModel>();
-            foreach (var game in _games)
-            {
-                if (game.IsWaitingForSecondPlayer())
-                {
-                    waitingGames.Add(game);
-                }
-            }
-
-            waitingGames.Sort(static (left, right) => right.DateCreated.CompareTo(left.DateCreated));
-
-            var gameList = new List<GameListItem>(waitingGames.Count);
-            foreach (var game in waitingGames)
-            {
-                gameList.Add(BuildGameListItem(game));
-            }
-
-            return gameList;
-        }
-
-        private static GameListItem BuildGameListItem(GameModel game)
-        {
-            var player = game.Players[0];
-            return new GameListItem
-            {
-                GameId = game.Id,
-                UserId = player.UserId,
-                UserName = player.Name,
-                TeamId = player.TeamId,
-                IsPasswordProtected = game.IsPasswordProtected()
-            };
-        }
-
-        private static List<ClientMessage> BuildGameStatusMessagesForAllPlayers(GameModel game)
-        {
-            var messages = new List<ClientMessage>(game.Players.Count);
-            var players = ClonePlayers(game.Players);
-
-            for (var i = 0; i < game.Players.Count; i++)
-            {
-                messages.Add(BuildGameStatusMessage(
-                    game.Id,
-                    players,
-                    i,
-                    _connections.GetConnectionsByKey(game.Players[i].UserId)));
-            }
-
-            return messages;
-        }
-
-        private static ClientMessage BuildGameStatusMessage(GameModel game, PlayerModel player, List<string> connectionIds)
-        {
-            var myPlayerIndex = -1;
-            for (var i = 0; i < game.Players.Count; i++)
-            {
-                if (ReferenceEquals(game.Players[i], player))
-                {
-                    myPlayerIndex = i;
-                    break;
-                }
-            }
-
-            return BuildGameStatusMessage(game.Id, ClonePlayers(game.Players), myPlayerIndex, connectionIds);
-        }
-
-        private static ClientMessage BuildGameStatusMessage(
-            string gameId,
-            List<PlayerModel> players,
-            int myPlayerIndex,
-            List<string> connectionIds)
-        {
-            return new ClientMessage(
-                "GameStatus",
-                connectionIds,
-                new GameStatusMessage
-                {
-                    GameStatus = new GameStatusForPlayerModel
-                    {
-                        GameId = gameId,
-                        Players = players,
-                        MyPlayerIndex = myPlayerIndex
-                    }
-                });
-        }
-
-        private static ClientMessage? BuildPlayerConnectionStatusChangedMessage(GameModel game, string userId, bool isConnected)
-        {
-            var player = game.GetPlayerByUserId(userId);
-            if (player == null)
-            {
-                return null;
-            }
-
-            var message = new PlayerOnlyConnectionStatusChangedMessage
-            {
-                GameId = game.Id,
-                UserName = player.Name,
-                TeamId = player.TeamId,
-                IsConnected = isConnected
-            };
-
-            AddChatMessage(game, message);
-            return new ClientMessage("PlayerOnlyConnectionStatusChanged", GetAllConnectionsByUsersIds(game.GetPlayersUsersIds()), message);
-        }
-
-        private static List<ClientMessage> BuildChatHistoryMessages(GameModel game, string connectionId)
-        {
-            var connectionIds = new List<string> { connectionId };
-            var messages = new List<ClientMessage>(game.ChatMessages.Count);
-            foreach (var message in game.ChatMessages)
-            {
-                if (message.IsMessageForChat)
-                {
-                    messages.Add(new ClientMessage(GetClientMethodName(message.TypeId), connectionIds, message));
-                }
-            }
-
-            return messages;
-        }
-
-        private static string GetClientMethodName(MessageToClientTypeEnum typeId)
-        {
-            return typeId switch
-            {
-                MessageToClientTypeEnum.ChatMessage => "ChatMessage",
-                MessageToClientTypeEnum.PlayerHasLeftGame => "PlayerHasLeftGame",
-                MessageToClientTypeEnum.PlayerHasSurrendered => "PlayerHasSurrendered",
-                MessageToClientTypeEnum.PlayerOnlyConnectionStatusChanged => "PlayerOnlyConnectionStatusChanged",
-                MessageToClientTypeEnum.PlayerWantsToRematch => "PlayerWantsRematch",
-                _ => throw new HubException("Unknown chat message type")
-            };
-        }
-
-        private static List<PlayerModel> ClonePlayers(List<PlayerModel> players)
-        {
-            var clonedPlayers = new List<PlayerModel>(players.Count);
-            foreach (var player in players)
-            {
-                clonedPlayers.Add(ClonePlayer(player));
-            }
-
-            return clonedPlayers;
-        }
-
-        private static PlayerModel ClonePlayer(PlayerModel player)
-        {
-            var figures = new List<FigureModel>(player.Figures.Count);
-            foreach (var figure in player.Figures)
-            {
-                figures.Add(CloneFigure(figure));
-            }
-
-            return new PlayerModel
-            {
-                UserId = player.UserId,
-                Name = player.Name,
-                IsTheirTurn = player.IsTheirTurn,
-                TeamId = player.TeamId,
-                IsWinner = player.IsWinner,
-                HasUserLeftTheGame = player.HasUserLeftTheGame,
-                WantsToRematch = player.WantsToRematch,
-                Figures = figures
-            };
-        }
-
-        private static FigureModel CloneFigure(FigureModel figure)
-        {
-            var canMoveToPositions = new List<FigurePositionModel>(figure.CanMoveToPositions.Count);
-            foreach (var position in figure.CanMoveToPositions)
-            {
-                canMoveToPositions.Add(new FigurePositionModel
-                {
-                    RowIndex = position.RowIndex,
-                    ColumnIndex = position.ColumnIndex
-                });
-            }
-
-            return new FigureModel
-            {
-                Id = figure.Id,
-                TypeId = figure.TypeId,
-                Position = new FigurePositionModel
-                {
-                    RowIndex = figure.Position.RowIndex,
-                    ColumnIndex = figure.Position.ColumnIndex
-                },
-                CanMoveToPositions = canMoveToPositions
-            };
-        }
-
-        private static List<string> GetAllConnectionsByUsersIds(List<string> usersIds)
-        {
-            var connectionIds = new List<string>();
-            foreach (var userId in usersIds)
-            {
-                connectionIds.AddRange(_connections.GetConnectionsByKey(userId));
-            }
-
-            return connectionIds;
-        }
-
-        private string GetRequiredUserIdByCurrentConnectionId()
-        {
-            return _connections.GetKeyByConnection(Context.ConnectionId)
-                ?? throw new HubException("Connection is not registered");
-        }
-
-        private static string NormalizeRequired(string? value, string message)
-        {
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                throw new HubException(message);
-            }
-
-            return value.Trim();
-        }
-
-        private static void ValidateTeam(TeamEnum teamId)
-        {
-            if (teamId is not TeamEnum.Cats and not TeamEnum.Mouse)
-            {
-                throw new HubException("Team is invalid");
-            }
-        }
-
-        private static TeamEnum GetOppositeTeam(TeamEnum teamId)
-        {
-            return teamId switch
-            {
-                TeamEnum.Cats => TeamEnum.Mouse,
-                TeamEnum.Mouse => TeamEnum.Cats,
-                _ => throw new HubException("Team is invalid")
-            };
-        }
-
-        private async Task SendMessagesAsync(IEnumerable<ClientMessage> messages)
-        {
-            foreach (var message in messages)
-            {
-                await SendMessageAsync(message);
-            }
-        }
-
-        private Task SendMessageAsync(ClientMessage message)
-        {
-            return message.ConnectionIds.Count == 0
-                ? Task.CompletedTask
-                : Clients.Clients(message.ConnectionIds).SendAsync(message.MethodName, message.Message);
-        }
-
-        private sealed record ClientMessage(string MethodName, List<string> ConnectionIds, IMessageToClient Message);
     }
 }

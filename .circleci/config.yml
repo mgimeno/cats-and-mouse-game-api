@@ -6,12 +6,27 @@ parameters:
   temp-upload-folder-slug:
     type: string
     default: "-temp-upload"
+  previous-release-folder-slug:
+    type: string
+    default: "-previous"
   server-base-folder:
     type: string
     default: "/home/$SSH_USER/apps/"
+  # The Raspberry Pi 5 the API runs on.
+  runtime-identifier:
+    type: string
+    default: "linux-arm64"
   build-dist-folder:
     type: string
-    default: "bin/Release/net10.0/publish"
+    default: "bin/Release/net11.0/linux-arm64/publish"
+  # Newest glibc symbol version the server provides: Debian 13 (trixie) ships 2.41. A Native AOT
+  # executable links against the build image's glibc and will not start on an older one.
+  server-glibc-version:
+    type: string
+    default: "2.41"
+  api-host:
+    type: string
+    default: "cats-and-mouse-api.marcosgimeno.com"
 
 commands:
   restore-dependencies:
@@ -20,31 +35,38 @@ commands:
       keyed by package id and version and never rewritten in place, so a stale
       or partial restore can never produce a wrong dependency graph: `dotnet
       restore` still resolves everything from the project files, it just skips
-      the downloads (~130 MB cold).
+      the downloads (~130 MB cold, plus the linux-arm64 Native AOT compiler and
+      runtime packs, which the API project restores with everything else).
     steps:
       - restore_cache:
           keys:
-            - nuget-v1-{{ arch }}-{{ checksum "CatsAndMouseApi.csproj" }}-{{ checksum "CatsAndMouseApi.Tests/CatsAndMouseApi.Tests.csproj" }}
+            - nuget-v2-{{ arch }}-{{ checksum "global.json" }}-{{ checksum "CatsAndMouseApi.csproj" }}-{{ checksum "CatsAndMouseApi.Tests/CatsAndMouseApi.Tests.csproj" }}
             # Falls back to any previous cache for this architecture. Most
             # packages are unchanged between version bumps, so a stale restore
             # still avoids the bulk of the downloads.
-            - nuget-v1-{{ arch }}-
+            - nuget-v2-{{ arch }}-
       - run:
           name: Restore dependencies
           command: dotnet restore CatsAndMouseApi.sln
       - save_cache:
-          key: nuget-v1-{{ arch }}-{{ checksum "CatsAndMouseApi.csproj" }}-{{ checksum "CatsAndMouseApi.Tests/CatsAndMouseApi.Tests.csproj" }}
+          key: nuget-v2-{{ arch }}-{{ checksum "global.json" }}-{{ checksum "CatsAndMouseApi.csproj" }}-{{ checksum "CatsAndMouseApi.Tests/CatsAndMouseApi.Tests.csproj" }}
           paths:
             - ~/.nuget/packages
 
 jobs:
-  # Tests and publish share one job on purpose: both need the same Release build, so a parallel
-  # test job would only compile it twice and pay a second restore and spin-up.
+  # Tests and publish share one job on purpose: a parallel test job would only pay a second
+  # restore and spin-up.
   build:
     docker:
-      - image: mcr.microsoft.com/dotnet/sdk:10.0
+      # The .NET 11 SDK with the Native AOT toolchain (gcc, zlib headers) on Azure Linux 3.0,
+      # whose glibc 2.38 is older than the server's 2.41: an executable linked against it runs on
+      # Debian 13, where one linked on the default Ubuntu 26.04 image (glibc 2.43) might not. The
+      # floating 11.0 tag picks up each SDK patch, and with it the runtime patch compiled into the
+      # executable: deploying is how a .NET security fix reaches the server.
+      - image: mcr.microsoft.com/dotnet/sdk:11.0-azurelinux3.0-aot
     # Gen2 Arm: newer CPUs for less than half the credits of the Gen1 class. Every job in this
-    # file runs on Gen2; the Gen1 fallback is the same name without `.gen2`.
+    # file runs on Gen2; the Gen1 fallback is the same name without `.gen2`. Arm64 also means the
+    # AOT compiler targets the server's architecture natively.
     resource_class: arm.medium.gen2
     # A saved cache is billed for its whole retention period, and every package bump saves a new
     # one. A week keeps the latest one warm between bumps for half the storage of the default
@@ -59,19 +81,55 @@ jobs:
     steps:
       - checkout
       - restore-dependencies
-      # One Release build serves the tests and the publish: `--no-restore` and `--no-build` keep
-      # each later command from repeating the restore and the build's up-to-date checks.
       - run:
           name: Build
           command: dotnet build CatsAndMouseApi.sln --configuration Release --no-restore
       - run:
-          name: Unit tests
-          command: dotnet test CatsAndMouseApi.sln --configuration Release --no-build
+          name: Unit and integration tests
+          command: dotnet test --solution CatsAndMouseApi.sln --configuration Release --no-build
+      # The executable the server runs. Compiled for linux-arm64 rather than reusing the portable
+      # build above, so it gets its own compile, but no second restore.
       - run:
-          name: Publish
-          command: dotnet publish CatsAndMouseApi.csproj --configuration Release --no-build --output << pipeline.parameters.build-dist-folder >>
-      # Only the publish output (under 1 MB), not the whole checkout with its bin/ and obj/
-      # folders, which the deploy job had to download again.
+          name: Publish (Native AOT)
+          command: dotnet publish CatsAndMouseApi.csproj --configuration Release --runtime << pipeline.parameters.runtime-identifier >> --no-restore
+      - run:
+          name: Check the executable runs on the server's glibc
+          command: |
+            EXECUTABLE="<< pipeline.parameters.build-dist-folder >>/CatsAndMouseApi"
+            REQUIRED="$(grep -aoE 'GLIBC_[0-9]+(\.[0-9]+)+' "$EXECUTABLE" | sed 's/^GLIBC_//' | sort -uV | tail -n 1)"
+            AVAILABLE="<< pipeline.parameters.server-glibc-version >>"
+            echo "The executable needs glibc ${REQUIRED}; the server has ${AVAILABLE}."
+            if [ "$(printf '%s\n%s\n' "$REQUIRED" "$AVAILABLE" | sort -V | tail -n 1)" != "$AVAILABLE" ]; then
+              echo "It would not start on the server. Build on an image with an older glibc." >&2
+              exit 1
+            fi
+      # The tests above run on the JIT. This plays a game against the Native AOT executable itself,
+      # in Production mode, so anything only that build gets wrong fails here, before the deploy.
+      - run:
+          name: Smoke test the published executable
+          command: |
+            cd "<< pipeline.parameters.build-dist-folder >>"
+            ASPNETCORE_ENVIRONMENT=Production ./CatsAndMouseApi > /tmp/api.log 2>&1 &
+            API_PID=$!
+            trap 'kill "$API_PID" 2> /dev/null || true' EXIT
+
+            READY=0
+            for attempt in $(seq 1 100); do
+              if curl -fsS -o /dev/null -H "Host: << pipeline.parameters.api-host >>" http://127.0.0.1:53000/status; then
+                READY=1
+                break
+              fi
+              sleep 0.1
+            done
+            if [ "$READY" != 1 ]; then
+              cat /tmp/api.log >&2
+              echo "The API did not start." >&2
+              exit 1
+            fi
+
+            ~/<< pipeline.parameters.project-folder >>/scripts/smoke-test.sh http://127.0.0.1:53000 "<< pipeline.parameters.api-host >>" ||
+              { cat /tmp/api.log >&2; exit 1; }
+      # Only the publish output (a single executable and its settings), not the whole checkout.
       - persist_to_workspace:
           root: ~/<< pipeline.parameters.project-folder >>
           paths:
@@ -96,6 +154,7 @@ jobs:
             SERVER_BASE_FOLDER="<< pipeline.parameters.server-base-folder >>"
             LIVE_DIR="${SERVER_BASE_FOLDER}<< pipeline.parameters.project-folder >>"
             TEMP_DIR="${LIVE_DIR}<< pipeline.parameters.temp-upload-folder-slug >>"
+            PREVIOUS_DIR="${LIVE_DIR}<< pipeline.parameters.previous-release-folder-slug >>"
 
             mkdir -p ~/.ssh
             ssh-keyscan -p "$SSH_PORT" "$SSH_HOST" >> ~/.ssh/known_hosts
@@ -108,19 +167,45 @@ jobs:
 
             # Stream the release straight into a fresh temp folder: no archive to write, upload,
             # unpack and delete in separate steps, and compression overlaps the upload. tar keeps
-            # file modes, so the apphost stays executable. A broken stream fails `tar` on the box,
-            # and with it this step, before anything below touches the live folder.
+            # file modes, so the executable stays executable. A broken stream fails `tar` on the
+            # box, and with it this step, before anything below touches the live folder.
             tar -C "<< pipeline.parameters.build-dist-folder >>" -czf - . \
               | ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "rm -rf '$TEMP_DIR' && mkdir -p '$TEMP_DIR' && tar -xzf - -C '$TEMP_DIR'"
 
             # Stop, swap and start in one remote shell. The API holds every running game in memory,
-            # so it is down only for the swap and its own startup, where it used to stay down across
-            # an SSH handshake per command.
+            # so it is down only for the swap and its own startup (tens of milliseconds for the
+            # Native AOT executable). The release it replaces is kept beside it: rolling back is
+            # stop, swap the two folders, start.
+            #
+            # `systemctl start` returns as soon as the process exists, so the step then waits for
+            # the API to actually answer, through the same Host header nginx sends. A release that
+            # does not come up fails the deploy, with the service's last log lines, instead of
+            # passing while the game is down.
+            #
+            # First, though, the unit has to run the executable itself. One that still starts
+            # `dotnet CatsAndMouseApi.dll` (the framework-dependent build before .NET 11) cannot
+            # start this release, so the deploy stops there, with the live API untouched.
             ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "set -e
+              case \"\$(systemctl show kestrel-CATS_AND_MOUSE_API -p ExecStart --value)\" in
+                *'argv[]=$LIVE_DIR/CatsAndMouseApi ;'*) ;;
+                *) echo 'kestrel-CATS_AND_MOUSE_API does not start $LIVE_DIR/CatsAndMouseApi. Install kestrel/kestrel-CATS_AND_MOUSE_API.service from the raspberry repository first. Nothing was changed.' >&2
+                   exit 1 ;;
+              esac
               sh '${SERVER_BASE_FOLDER}scripts/stop-cats-and-mouse-api.sh'
-              rm -rf '$LIVE_DIR'
+              rm -rf '$PREVIOUS_DIR'
+              if [ -d '$LIVE_DIR' ]; then mv '$LIVE_DIR' '$PREVIOUS_DIR'; fi
               mv '$TEMP_DIR' '$LIVE_DIR'
-              sh '${SERVER_BASE_FOLDER}scripts/start-cats-and-mouse-api.sh'"
+              sh '${SERVER_BASE_FOLDER}scripts/start-cats-and-mouse-api.sh'
+              for attempt in \$(seq 1 50); do
+                if curl -fsS -o /dev/null -m 2 -H 'Host: << pipeline.parameters.api-host >>' http://127.0.0.1:53000/status; then
+                  echo 'The API is up.'
+                  exit 0
+                fi
+                sleep 0.2
+              done
+              echo 'The API did not come up after the deploy.' >&2
+              journalctl -u kestrel-CATS_AND_MOUSE_API -n 50 --no-pager >&2 || true
+              exit 1"
 
 workflows:
   build-and-deploy:

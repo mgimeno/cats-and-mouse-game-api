@@ -1,10 +1,8 @@
-﻿
-namespace CatsAndMouseApi.Models
+namespace CatsAndMouseApi.Models;
+
+public sealed class MoveFigureModel
 {
-    public class MoveFigureModel
-    {
-        public int FigureId { get; set; }
-        public int RowIndex { get; set; }
-        public int ColumnIndex { get; set; }
-    }
+    public int FigureId { get; init; }
+    public int RowIndex { get; init; }
+    public int ColumnIndex { get; init; }
 }

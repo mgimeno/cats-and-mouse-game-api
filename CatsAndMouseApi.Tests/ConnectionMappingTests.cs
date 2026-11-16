@@ -68,4 +68,17 @@ public sealed class ConnectionMappingTests
 
         Assert.Null(mapping.RemoveConnection("missing"));
     }
+
+    [Fact]
+    public void GetConnectionsByKey_returns_a_copy_that_later_changes_do_not_touch()
+    {
+        var mapping = new ConnectionMapping<string>();
+        mapping.Add("user-1", "connection-1");
+
+        var snapshot = mapping.GetConnectionsByKey("user-1");
+        mapping.Add("user-1", "connection-2");
+        mapping.RemoveConnection("connection-1");
+
+        Assert.Equal(["connection-1"], snapshot);
+    }
 }

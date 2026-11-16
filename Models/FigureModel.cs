@@ -1,34 +1,23 @@
 ﻿using CatsAndMouseApi.Enums;
 
-namespace CatsAndMouseApi.Models
+namespace CatsAndMouseApi.Models;
+
+public sealed class FigureModel(int id, FigureTypeEnum typeId, BoardPosition position)
 {
-    public class FigureModel
+    public int Id { get; } = id;
+    public FigureTypeEnum TypeId { get; } = typeId;
+    public BoardPosition Position { get; private set; } = position;
+
+    /// <summary>Recalculated by <see cref="GameModel"/> after every move. A figure has at most four.</summary>
+    public List<BoardPosition> CanMoveToPositions { get; } = [with(capacity: 4)];
+
+    public void ChangePosition(int rowIndex, int columnIndex)
     {
-        public int Id { get; set; }
-        public FigurePositionModel Position { get; set; }
-        public FigureTypeEnum TypeId { get; set; }
-        public List<FigurePositionModel> CanMoveToPositions { get; set; }
+        Position = new BoardPosition(rowIndex, columnIndex);
+    }
 
-        public FigureModel()
-        {
-            this.Position = new FigurePositionModel();
-            this.CanMoveToPositions = new List<FigurePositionModel>(4);
-        }
-
-        public void ChangePosition(int rowIndex, int columnIndex)
-        {
-            this.Position.RowIndex = rowIndex;
-            this.Position.ColumnIndex = columnIndex;
-        }
-
-        public void AddCanMoveToPosition(int rowIndex, int columnIndex)
-        {
-            this.CanMoveToPositions.Add(new FigurePositionModel
-            {
-                RowIndex = rowIndex,
-                ColumnIndex = columnIndex
-            });
-        }
-
+    public bool CanMoveTo(int rowIndex, int columnIndex)
+    {
+        return CanMoveToPositions.Contains(new BoardPosition(rowIndex, columnIndex));
     }
 }

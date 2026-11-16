@@ -1,7 +1,6 @@
-﻿namespace CatsAndMouseApi.Models
+namespace CatsAndMouseApi.Models;
+
+public sealed class GameIdModel
 {
-    public class GameIdModel
-    {
-        public string GameId { get; set; } = string.Empty;
-    }
+    public string GameId { get; init; } = string.Empty;
 }

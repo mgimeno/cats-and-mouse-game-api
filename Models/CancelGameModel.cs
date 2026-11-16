@@ -1,9 +1,8 @@
-﻿namespace CatsAndMouseApi.Models
+namespace CatsAndMouseApi.Models;
+
+public sealed class CancelGameModel
 {
-    public class CancelGameModel
-    {
-        public string GameId { get; set; } = string.Empty;
-        public string UserId { get; set; } = string.Empty;
-        public bool SendAwaitingGamesToAllClients { get; set; } = true;
-    }
+    public string GameId { get; init; } = string.Empty;
+    public string UserId { get; init; } = string.Empty;
+    public bool SendAwaitingGamesToAllClients { get; init; } = true;
 }
