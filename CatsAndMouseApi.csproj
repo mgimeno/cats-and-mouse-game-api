@@ -6,8 +6,17 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
+  <!-- Restore fails, locally and in CI, on a high (NU1903) or critical (NU1904) advisory in any
+       package that ships with the API, transitive ones included: the .NET side of the UI repos'
+       production `npm audit` gate at high severity. Lower severities stay warnings. The test
+       project is left out on purpose, since its packages never reach the server. -->
+  <PropertyGroup>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <WarningsAsErrors>$(WarningsAsErrors);NU1903;NU1904</WarningsAsErrors>
+  </PropertyGroup>
+
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.7" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.15" />
   </ItemGroup>
 
   <ItemGroup>

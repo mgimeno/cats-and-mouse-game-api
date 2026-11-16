@@ -13,30 +13,76 @@ parameters:
     type: string
     default: "bin/Release/net10.0/publish"
 
+commands:
+  restore-dependencies:
+    description: >
+      Restores NuGet packages with a warm global packages folder. The folder is
+      keyed by package id and version and never rewritten in place, so a stale
+      or partial restore can never produce a wrong dependency graph: `dotnet
+      restore` still resolves everything from the project files, it just skips
+      the downloads (~130 MB cold).
+    steps:
+      - restore_cache:
+          keys:
+            - nuget-v1-{{ arch }}-{{ checksum "CatsAndMouseApi.csproj" }}-{{ checksum "CatsAndMouseApi.Tests/CatsAndMouseApi.Tests.csproj" }}
+            # Falls back to any previous cache for this architecture. Most
+            # packages are unchanged between version bumps, so a stale restore
+            # still avoids the bulk of the downloads.
+            - nuget-v1-{{ arch }}-
+      - run:
+          name: Restore dependencies
+          command: dotnet restore CatsAndMouseApi.sln
+      - save_cache:
+          key: nuget-v1-{{ arch }}-{{ checksum "CatsAndMouseApi.csproj" }}-{{ checksum "CatsAndMouseApi.Tests/CatsAndMouseApi.Tests.csproj" }}
+          paths:
+            - ~/.nuget/packages
+
 jobs:
+  # Tests and publish share one job on purpose: both need the same Release build, so a parallel
+  # test job would only compile it twice and pay a second restore and spin-up.
   build:
     docker:
       - image: mcr.microsoft.com/dotnet/sdk:10.0
-    resource_class: arm.medium
+    # Gen2 Arm: newer CPUs for less than half the credits of the Gen1 class. Every job in this
+    # file runs on Gen2; the Gen1 fallback is the same name without `.gen2`.
+    resource_class: arm.medium.gen2
+    # A saved cache is billed for its whole retention period, and every package bump saves a new
+    # one. A week keeps the latest one warm between bumps for half the storage of the default
+    # 15 days, and storage beyond the Free plan's 2 GB is paid in credits.
+    retention:
+      caches: 7d
+    environment:
+      # The SDK image already skips the logo, the dev certificate and NuGet's XML docs; this skips
+      # the telemetry each dotnet command would otherwise send.
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
     working_directory: ~/<< pipeline.parameters.project-folder >>
     steps:
       - checkout
+      - restore-dependencies
+      # One Release build serves the tests and the publish: `--no-restore` and `--no-build` keep
+      # each later command from repeating the restore and the build's up-to-date checks.
+      - run:
+          name: Build
+          command: dotnet build CatsAndMouseApi.sln --configuration Release --no-restore
       - run:
           name: Unit tests
-          command: dotnet test CatsAndMouseApi.sln --configuration Release
+          command: dotnet test CatsAndMouseApi.sln --configuration Release --no-build
       - run:
           name: Publish
-          command: dotnet publish --configuration Release --output bin/Release/net10.0/publish
+          command: dotnet publish CatsAndMouseApi.csproj --configuration Release --no-build --output << pipeline.parameters.build-dist-folder >>
+      # Only the publish output (under 1 MB), not the whole checkout with its bin/ and obj/
+      # folders, which the deploy job had to download again.
       - persist_to_workspace:
           root: ~/<< pipeline.parameters.project-folder >>
           paths:
-            - .
+            - << pipeline.parameters.build-dist-folder >>
 
   deploy:
     working_directory: ~/<< pipeline.parameters.project-folder >>
     docker:
       - image: cimg/base:current
-    resource_class: arm.medium
+    # Everything here waits on the network and on the box, so more vCPUs would only cost more.
+    resource_class: arm.medium.gen2
     steps:
       - attach_workspace:
           at: ~/<< pipeline.parameters.project-folder >>
@@ -47,30 +93,34 @@ jobs:
           name: Deploy to server
           no_output_timeout: 5m
           command: |
+            SERVER_BASE_FOLDER="<< pipeline.parameters.server-base-folder >>"
+            LIVE_DIR="${SERVER_BASE_FOLDER}<< pipeline.parameters.project-folder >>"
+            TEMP_DIR="${LIVE_DIR}<< pipeline.parameters.temp-upload-folder-slug >>"
+
             mkdir -p ~/.ssh
             ssh-keyscan -p "$SSH_PORT" "$SSH_HOST" >> ~/.ssh/known_hosts
 
-            # Prepare temp folder
-            ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "rm -rf << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>"
-            ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "mkdir -p << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>"
+            # Both ssh calls below ride one connection to the box, opened by the first of them: the
+            # second would otherwise pay its own TCP handshake, key exchange and authentication
+            # round trips. The connection is closed when the step ends, failed or not.
+            printf '%s\n' 'Host *' '  ControlMaster auto' '  ControlPath ~/.ssh/cm-%C' '  ControlPersist 2m' >> ~/.ssh/config
+            trap 'ssh -O exit -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" 2> /dev/null || true' EXIT
 
-            # Zip and upload
-            cd << pipeline.parameters.build-dist-folder >>
-            zip -r << pipeline.parameters.project-folder >>.zip ./*
-            scp -P "$SSH_PORT" << pipeline.parameters.project-folder >>.zip "$SSH_USER@$SSH_HOST:<< pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>"
+            # Stream the release straight into a fresh temp folder: no archive to write, upload,
+            # unpack and delete in separate steps, and compression overlaps the upload. tar keeps
+            # file modes, so the apphost stays executable. A broken stream fails `tar` on the box,
+            # and with it this step, before anything below touches the live folder.
+            tar -C "<< pipeline.parameters.build-dist-folder >>" -czf - . \
+              | ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "rm -rf '$TEMP_DIR' && mkdir -p '$TEMP_DIR' && tar -xzf - -C '$TEMP_DIR'"
 
-            # Unzip
-            ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "unzip -d << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >> << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>/<< pipeline.parameters.project-folder >>.zip"
-            ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "rm -f << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>/<< pipeline.parameters.project-folder >>.zip"
-
-            # Set permissions as executable
-            ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "chmod +x << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >>/CatsAndMouseApi"
-
-            # Stop service, swap folders, start service
-            ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "sh << pipeline.parameters.server-base-folder >>scripts/stop-cats-and-mouse-api.sh"
-            ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "rm -rf << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >>"
-            ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "mv << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >><< pipeline.parameters.temp-upload-folder-slug >> << pipeline.parameters.server-base-folder >><< pipeline.parameters.project-folder >>"
-            ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "sh << pipeline.parameters.server-base-folder >>scripts/start-cats-and-mouse-api.sh"
+            # Stop, swap and start in one remote shell. The API holds every running game in memory,
+            # so it is down only for the swap and its own startup, where it used to stay down across
+            # an SSH handshake per command.
+            ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "set -e
+              sh '${SERVER_BASE_FOLDER}scripts/stop-cats-and-mouse-api.sh'
+              rm -rf '$LIVE_DIR'
+              mv '$TEMP_DIR' '$LIVE_DIR'
+              sh '${SERVER_BASE_FOLDER}scripts/start-cats-and-mouse-api.sh'"
 
 workflows:
   build-and-deploy:
