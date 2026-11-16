@@ -1,4 +1,6 @@
 using System.IO.Compression;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using CatsAndMouseApi.Hubs;
 using CatsAndMouseApi.Serialization;
 using CatsAndMouseApi.Services;
@@ -142,12 +144,19 @@ static string BuildStatusText(IHostEnvironment environment, string[] allowedOrig
     isDebugMode = true;
 #endif
 
+    // The runtime that is actually executing, e.g. ".NET 11.0.0 (Native AOT, linux-arm64)". Under
+    // Native AOT it is the runtime compiled into the executable, so it shows which patch a deploy
+    // brought; there is no dynamic code there, which is how AOT is told apart from the JIT.
+    var runtime = $"{RuntimeInformation.FrameworkDescription} " +
+                  $"({(RuntimeFeature.IsDynamicCodeSupported ? "JIT" : "Native AOT")}, {RuntimeInformation.RuntimeIdentifier})";
+
     return $"""
 
         Cats & Mouse API is ready
 
         Build Mode: {(isDebugMode ? "DEBUG (Development)" : "RELEASE (Production)")}
         Environment: {environment.EnvironmentName.ToUpperInvariant()}
+        Runtime: {runtime}
         Allowed origins: {string.Join(", ", allowedOrigins)}
         """;
 }

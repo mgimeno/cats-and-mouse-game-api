@@ -33,6 +33,7 @@ public sealed class HubIntegrationTests(WebApplicationFactory<Program> factory) 
         var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
         Assert.Contains("Cats & Mouse API is ready", body, StringComparison.Ordinal);
         Assert.Contains("Environment: DEVELOPMENT", body, StringComparison.Ordinal);
+        Assert.Contains($"Runtime: .NET {Environment.Version.ToString(3)} (JIT, ", body, StringComparison.Ordinal);
     }
 
     [Theory]
